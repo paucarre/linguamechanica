@@ -1,0 +1,17 @@
+.vscode
+*/.ipynb_checkpoints
+checkpoints
+runs
+poetry.lock
+build
+.coverage
+*.model
+*.backup
+.DS_Store
+*/__pycache__
+*.pyc
+*.out
+datasets/images
+src/*.png
+*.temp
+*.svg

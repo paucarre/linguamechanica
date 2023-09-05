@@ -1,0 +1,63 @@
+[tool.poetry]
+name = "linguamechanica"
+version = "0.1.0"
+description = ""
+authors = ["Pau Carré Cardona <pau.carre@gmail.com>"]
+readme = "README.md"
+packages = [{include = "linguamechanica"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+coverage = "7.2.7"
+black = "^23.3.0"
+pytest = "^7.3.2"
+pyqt5 = "^5.15.9"
+trimesh = "^3.22.1"
+pycollada = "^0.7.2"
+pydot = "^1.4.2"
+autoflake = "^2.2.0"
+fvcore = "^0.1.5.post20221221"
+iopath = "^0.1.10"
+jupyterlab = "4.0.1"
+seaborn = "0.12.2"
+tensorboard = "2.12.3"
+#torchmetrics = "0.11.4"
+tqdm = "^4.65.0"
+#torch = [
+#    {url = "https://download.pytorch.org/whl/cu118/torch-2.0.1%2Bcu118-cp310-cp310-linux_x86_64.whl", platform = "linux", python = ">=3.10 <3.11"},
+#]
+#lightning = "^2.0.2"
+#torchvision = "0.15.2+cu118"
+#pytorch3d = [
+#    {url = "https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu113_pyt1110/pytorch3d-0.7.2-cp310-cp310-linux_x86_64.whl", platform = "linux", python = ">=3.10 <3.11"},
+#]
+pytransform3d = "^3.4.0"
+#gymnasium = {extras = ["accept-rom-license", "atari"], version = "^0.28.1"}
+#gym = "^0.26.2"
+pytest-coverage = "^0.0"
+#torchrl = "^0.1.1"
+pyright = "^1.1.322"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[[tool.poetry.source]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu118"
+priority = "supplemental"
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "supplemental"
+
+[[tool.poetry.source]]
+name = "pytorch3d"
+url = "https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu113_pyt1110"
+priority = "supplemental"
+
+[[tool.poetry.source]]
+name = "PyPI"
+priority = "primary"
