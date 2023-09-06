@@ -72,7 +72,7 @@ class DifferentiableOpenChainMechanism:
         self.screws = screws
         self.initial_matrix = to_left_multiplied(initial_matrix)
         self.joint_limits = joint_limits
-        self.device = "cuda:0"
+        self.device = "cpu"
         self.screws = self.screws.to(self.device)
         self.initial_matrix = self.initial_matrix.to(self.screws.device)
 
@@ -88,10 +88,10 @@ class DifferentiableOpenChainMechanism:
         transformation = self.forward_transformation(thetas)
         twist = transforms.se3_log_map(transformation.get_matrix())
         return twist
-    
+
     def compute_pose_and_error_pose(self, thetas, target_pose):
-        #print(self.device, thetas.device, target_pose.device)
-        #print("compute_error_pose", thetas.shape, target_pose.shape)
+        # print(self.device, thetas.device, target_pose.device)
+        # print("compute_error_pose", thetas.shape, target_pose.shape)
         current_transformation = self.forward_transformation(thetas)
         target_transformation = transforms.se3_exp_map(target_pose)
         current_trans_to_target = current_transformation.compose(
@@ -99,11 +99,11 @@ class DifferentiableOpenChainMechanism:
         )
         current_trans_to_target = current_trans_to_target.to(thetas.device).get_matrix()
         error_pose = transforms.se3_log_map(current_trans_to_target)
-        pose = transforms.se3_log_map(current_transformation.get_matrix())        
+        pose = transforms.se3_log_map(current_transformation.get_matrix())
         return pose, error_pose
 
     def compute_error_pose(self, thetas, target_pose):
-        #print("compute_error_pose", thetas.shape, target_pose.shape)
+        # print("compute_error_pose", thetas.shape, target_pose.shape)
         current_transformation = self.forward_transformation(thetas)
         target_transformation = transforms.se3_exp_map(target_pose)
         current_trans_to_target = current_transformation.compose(
@@ -204,7 +204,7 @@ class DifferentiableOpenChainMechanism:
 
     def forward_transformation(self, coordinates):
         self.screws = self.screws.to(coordinates.device)
-        #print("forward_transformation", self.screws.shape, coordinates.unsqueeze(2).shape)
+        # print("forward_transformation", self.screws.shape, coordinates.unsqueeze(2).shape)
         twist = self.screws * coordinates.unsqueeze(2)
         original_shape = twist.shape
         twist = twist.view(-1, original_shape[2])
@@ -364,7 +364,7 @@ if __name__ == "__main__":
     urdf_robot = UrdfRobotLibrary.dobot_cr5()
     open_chains = urdf_robot.extract_open_chains(0.1)
 
-'''
+"""
 Working:
 get_pose_and_pose_error torch.Size([1024, 6]) torch.Size([1024, 6])
 compute_error_pose torch.Size([1024, 6]) torch.Size([1024, 6])
@@ -373,4 +373,4 @@ Error:
 get_pose_and_pose_error torch.Size([16, 1018, 12]) torch.Size([16, 6, 12])
 compute_error_pose torch.Size([16, 1018, 12]) torch.Size([16, 6, 12])
 forward_transformation torch.Size([6, 6]) torch.Size([16, 1018, 1, 12])
-'''
+"""

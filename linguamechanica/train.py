@@ -12,7 +12,7 @@ def eval_policy(agent, training_state, eval_episodes=10):
     urdf_robot = UrdfRobotLibrary.dobot_cr5()
     open_chain = urdf_robot.extract_open_chains(0.3)[-1]
     batch_size = 32
-    eval_env = Environment(batch_size,  open_chain, training_state)
+    eval_env = Environment(batch_size, open_chain, training_state)
     avg_acc_reward = 0.0
     initial_rewards = torch.zeros(eval_episodes)
     final_rewards = torch.zeros(eval_episodes)
@@ -25,10 +25,10 @@ def eval_policy(agent, training_state, eval_episodes=10):
             # During evaluation use mu instead of action as action has noise
             # and during infernence it should not explore
             action, state, reward, done = eval_env.step(mu)
-            #if eval_reward is None:
+            # if eval_reward is None:
             #    #initial_rewards[idx] = reward
             #    #eval_reward = reward
-            #else:
+            # else:
             #    eval_reward += reward
         final_rewards[idx] = reward
         avg_acc_reward += eval_reward
@@ -59,19 +59,22 @@ def summary_done(summary, training_state, episode):
 
 
 def train():
-    summary = SummaryWriter()
     urdf_robot = UrdfRobotLibrary.dobot_cr5()
-    #TODO: do it well!
+    # TODO: do it well!
     a = torch.zeros(1).cuda()
     open_chain = urdf_robot.extract_open_chains(0.3)[-1].to(a.device)
     # TODO: place all these constants as arguments
 
     training_state = TrainingState()
-    env = Environment(training_state.episode_batch_size, open_chain, training_state).to(a.device)
+    env = Environment(training_state.episode_batch_size, open_chain, training_state).to(
+        a.device
+    )
+    summary = SummaryWriter()
     agent = IKAgent(
         open_chain=open_chain,
         summary=summary,
         lr_actor=training_state.lr_actor,
+        lr_actor_geodesic=training_state.lr_actor_geodesic,
         lr_critic=training_state.lr_critic,
         state_dims=(env.state_dimensions),
         action_dims=env.action_dims,
@@ -84,8 +87,7 @@ def train():
         replay_buffer_max_size=training_state.replay_buffer_max_size(),
     )
     episode = EpisodeState(training_state.gamma)
-    state, done = env.reset(), False
-    #initial_reward = None
+    state, done = env.reset(), None
     # agent.load(f"checkpoint_46999")
 
     for training_state.t in range(training_state.t, int(training_state.max_timesteps)):
@@ -115,9 +117,8 @@ def train():
 
         # Perform action
         action, next_state, reward, done = env.step(action)
-        #print("WTF", next_state.shape, reward.shape, done.shape)
+        # print("WTF", next_state.shape, reward.shape, done.shape)
         summary.add_scalar("Step Batch Reward", reward.mean(), training_state.t)
-        episode.step(reward)
         agent.store_transition(
             state=state.detach().cpu(),
             action=action.detach().cpu(),
@@ -125,34 +126,23 @@ def train():
             next_state=next_state.detach().cpu(),
             done=done.detach().cpu(),
         )
-        state = next_state
-        #if initial_reward is None:
-        #    initial_reward = reward
+        if episode.step(reward, done):
+            state, done = env.reset(), None
+        else:
+            state = next_state
 
         if training_state.can_train_buffer():
             agent.train_buffer(training_state)
-        #if training_state.can_eval_policy():
+        # if training_state.can_eval_policy():
         #    avg_acc_reward, initial_rewards, final_rewards = eval_policy(
         #        agent, training_state, 2
         #    )
         #    summary_evaluatation(
-        #        summary, initial_rewards, final_rewards, avg_acc_reward, training_state
+        #        summary, initial_rewards.mean(), final_rewards.mean(), avg_acc_reward, training_state
         #    )
 
         if training_state.can_save():
             agent.save(training_state)
-
-        #if done:
-        #    final_reward = reward
-        #    summary.add_scalar(
-        #        "Reward Improvement Training",
-        #        final_reward / (initial_reward + 1e-10),
-        #        training_state.t,
-        #    )
-        #    state = env.reset()
-        #    initial_reward = None
-        #    done = False
-        #    episode.create_new()
 
     summary.close()
 

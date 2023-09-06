@@ -40,7 +40,6 @@ class Environment:
         self.open_chain = self.open_chain.to(self.device)
         self.weights = self.weights.to(self.device)
         self.max_noise_clip = training_state.max_noise_clip
-        self.max_action = training_state.max_action
 
     def to(self, device):
         self.device = device
@@ -61,7 +60,7 @@ class Environment:
             samples.append(torch.Tensor(coordinates).unsqueeze(0))
         return torch.cat(samples, 0).to(self.device)
 
-    #def sample_random_action(self):
+    # def sample_random_action(self):
     #    # TODO: this is a bit silly for now
     #    return self.uniformly_sample_parameters_within_constraints()# / math.pi
 
@@ -76,18 +75,16 @@ class Environment:
         target_transformation = self.open_chain.forward_transformation(
             self.target_parameters
         )
-        self.target_pose = transforms.se3_log_map(
-            target_transformation.get_matrix()
-        )
+        self.target_pose = transforms.se3_log_map(target_transformation.get_matrix())
         # TODO:
         # - Add a level which modulates upwards the noise
         # - Constraint values to the actuator constraints
         # The higher the level is, the higher the noise
         # so that the network learns to solve harder problems
-        max_episode_cumulative_action = self.max_action * self.max_steps_done
-        noise = torch.randn_like(self.target_parameters) * max_episode_cumulative_action
-        noise = noise.clamp(-max_episode_cumulative_action * 0.5, max_episode_cumulative_action * 0.5)
-        self.current_thetas = (self.target_parameters.detach().clone() + noise).to(self.device)
+        noise = torch.randn_like(self.target_parameters) * 1.0
+        self.current_thetas = (self.target_parameters.detach().clone() + noise).to(
+            self.device
+        )
         # self.uniformly_sample_parameters_within_constraints()
         observation = self.generate_observation().to(self.device)
         self.current_step = torch.zeros(self.batch_size, 1).to(self.device)
@@ -115,13 +112,13 @@ class Environment:
         instance, the revolute joints will go from (-pi, pi)
         or (0, 2 * pi).
         """
-        #print(action.shape)
-        #TODO: do this niceely
+        # print(action.shape)
+        # TODO: do this niceely
         theta_deltas_sin = action[:, :, 0]
         theta_deltas_cos = action[:, :, 1]
         theta_deltas = torch.atan2(theta_deltas_sin, theta_deltas_cos)
         self.current_thetas[:, :] += theta_deltas[:, :]
-        #force_parameters_within_bounds(self.current_thetas)
+        # force_parameters_within_bounds(self.current_thetas)
         # self.current_parameter_index = (self.current_parameter_index + 1) % len(
         #    self.open_chain
         # )
@@ -129,4 +126,5 @@ class Environment:
         reward, done = self.compute_reward()
         observation = self.generate_observation()
         done = torch.logical_or(done, self.current_step >= self.max_steps_done)
+        # print(done)
         return theta_deltas, observation, reward, done
