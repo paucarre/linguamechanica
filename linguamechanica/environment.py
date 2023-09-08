@@ -20,15 +20,7 @@ class Environment:
         """
         State dims should be for now:
             - Target pose, 6 
-            - Current pose, 6
-            - Current parameters, 6 
-              Note that the current pose might
-              not be informative enough as to know
-              the current parameters one would need to solve the
-              inverse kinematics for the current pose,
-              which might be an even more difficult task.
-        Action size should be:
-            - Angle: sigmoid(x) - 0.5 or something similar
+            - Current thetas 6 
         """
         self.weights = training_state.weights
         self.state_dimensions = 12
@@ -50,7 +42,6 @@ class Environment:
         for sample_idx in range(self.batch_size):
             coordinates = []
             for i in range(len(self.open_chain.joint_limits)):
-                # TODO: check if unconstrained works
                 coordinates.append(
                     random.uniform(
                         self.open_chain.joint_limits[i][0],
@@ -59,10 +50,6 @@ class Environment:
                 )
             samples.append(torch.Tensor(coordinates).unsqueeze(0))
         return torch.cat(samples, 0).to(self.device)
-
-    # def sample_random_action(self):
-    #    # TODO: this is a bit silly for now
-    #    return self.uniformly_sample_parameters_within_constraints()# / math.pi
 
     def generate_observation(self):
         state = torch.zeros(self.batch_size, self.state_dimensions)
@@ -122,9 +109,7 @@ class Environment:
         # self.current_parameter_index = (self.current_parameter_index + 1) % len(
         #    self.open_chain
         # )
-        # print(f"{self.target_parameters} | {self.current_thetas}")
         reward, done = self.compute_reward()
         observation = self.generate_observation()
         done = torch.logical_or(done, self.current_step >= self.max_steps_done)
-        # print(done)
         return theta_deltas, observation, reward, done

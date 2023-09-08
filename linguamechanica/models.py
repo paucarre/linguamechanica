@@ -114,7 +114,7 @@ class PseudoinvJacobianIKActor(nn.Module):
         target_pose = state[:, :6]
         self.open_chain = self.open_chain.to(state.device)
         error_pose = self.open_chain.compute_error_pose(current_thetas, target_pose)
-        # TODO: the constant factor should be something else
+        # TODO: the constant factor should be a parameter
         mu = -0.01 * self.open_chain.inverse_kinematics_step(current_thetas, error_pose)
         var = torch.zeros(mu.shape).to(mu.device)
         return mu, var

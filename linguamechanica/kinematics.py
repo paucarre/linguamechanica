@@ -90,8 +90,6 @@ class DifferentiableOpenChainMechanism:
         return twist
 
     def compute_pose_and_error_pose(self, thetas, target_pose):
-        # print(self.device, thetas.device, target_pose.device)
-        # print("compute_error_pose", thetas.shape, target_pose.shape)
         current_transformation = self.forward_transformation(thetas)
         target_transformation = transforms.se3_exp_map(target_pose)
         current_trans_to_target = current_transformation.compose(
@@ -103,7 +101,6 @@ class DifferentiableOpenChainMechanism:
         return pose, error_pose
 
     def compute_error_pose(self, thetas, target_pose):
-        # print("compute_error_pose", thetas.shape, target_pose.shape)
         current_transformation = self.forward_transformation(thetas)
         target_transformation = transforms.se3_exp_map(target_pose)
         current_trans_to_target = current_transformation.compose(
@@ -215,7 +212,7 @@ class DifferentiableOpenChainMechanism:
             => The i-th index of the chain
             => The j-th chain ( it can be the same robot 
               with another pose or different robots 
-              so long they have the same number of degres of freedom)
+              so long they have the same number of degrees of freedom)
             => 4 rows of the left-transformation matrix
             => 4 columns of the left-transformation matrix
         ]
@@ -363,14 +360,3 @@ class UrdfRobotLibrary:
 if __name__ == "__main__":
     urdf_robot = UrdfRobotLibrary.dobot_cr5()
     open_chains = urdf_robot.extract_open_chains(0.1)
-
-"""
-Working:
-get_pose_and_pose_error torch.Size([1024, 6]) torch.Size([1024, 6])
-compute_error_pose torch.Size([1024, 6]) torch.Size([1024, 6])
-forward_transformation torch.Size([6, 6]) torch.Size([1024, 6, 1])                                                      forward_transformation torch.Size([6, 6]) torch.Size([1024, 6, 1]) 
-Error:
-get_pose_and_pose_error torch.Size([16, 1018, 12]) torch.Size([16, 6, 12])
-compute_error_pose torch.Size([16, 1018, 12]) torch.Size([16, 6, 12])
-forward_transformation torch.Size([6, 6]) torch.Size([16, 1018, 1, 12])
-"""

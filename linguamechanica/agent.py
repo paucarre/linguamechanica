@@ -144,7 +144,7 @@ class IKAgent:
         log_prob = -(log_prob_part_1 + log_prob_part_2)
         return log_prob
 
-    def choose_action(self, state, training_state):
+    def choose_action(self, state, training_state, summary=None):
         mu_v, var_v = None, None
         state = state.to(self.open_chain.device)
         current_thetas, target_pose = thetas_target_pose_from_state(state)
@@ -164,6 +164,27 @@ class IKAgent:
         """
         actions_v, noise = self.sample(mu_v, var_v)
         log_prob = self.compute_log_prob(mu_v, var_v, actions_v)
+        if summary is not None:
+            summary.add_scalar(
+                "Data Distributions / Data Generation Action Mean",
+                actions_v.mean(),
+                training_state.t,
+            )
+            summary.add_scalar(
+                "Data Distributions / Data Generation Action Std",
+                actions_v.std(),
+                training_state.t,
+            )
+            summary.add_scalar(
+                "Data Distributions / Noise w.r.t Action Ratio Mean",
+                (noise / (actions_v + 1e-20)).mean(),
+                training_state.t,
+            )
+            summary.add_scalar(
+                "Data Distributions / Data Generation Noise Std",
+                noise.std(),
+                training_state.t,
+            )
         return actions_v, log_prob, mu_v, noise
 
     def sample(self, mu, var):
@@ -191,12 +212,12 @@ class IKAgent:
         done = done.detach().clone().view(-1, done.shape[2])
         # print("replay buffer sample", training_state.batch_size(), state.shape, action.shape, reward.shape, next_state.shape, done.shape)
         self.summary.add_scalar(
-            "Train Buffer Action Mean",
+            "Data Distributions / Train Buffer Action Mean",
             action.mean(),
             training_state.t,
         )
         self.summary.add_scalar(
-            "Train Buffer Action Std",
+            "Data Distributions / Train Buffer Action Std",
             action.std(),
             training_state.t,
         )
@@ -237,7 +258,7 @@ class IKAgent:
         self.critic_q1_optimizer.step()
         self.critic_q2_optimizer.step()
         self.summary.add_scalar(
-            "Quality Loss (Q1 + Q2)",
+            "Loss / Train / Quality Loss (Q1 + Q2)",
             quality_loss,
             training_state.t,
         )
@@ -250,7 +271,7 @@ class IKAgent:
             next_thetas, target_pose, self.open_chain, training_state.weights
         )
         self.summary.add_scalar(
-            "Actor Geodesic Loss",
+            "Loss / Train / Actor Geodesic Loss",
             actor_geodesic_loss,
             training_state.t,
         )
@@ -264,7 +285,7 @@ class IKAgent:
             self.actor_optimizer.zero_grad()
             actor_q_learning_loss = -self.critic_q1(next_thetas, target_pose).mean()
             self.summary.add_scalar(
-                "Actor Q Learning Loss",
+                "Loss / Train / Actor Q Learning Loss",
                 actor_q_learning_loss,
                 training_state.t,
             )

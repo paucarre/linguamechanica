@@ -5,7 +5,7 @@ import torch
 @dataclass
 class TrainingState:
     episode_batch_size: int = 64
-    save_freq: int = 1000
+    save_freq: int = 10000
     lr_actor: float = 1e-5
     lr_actor_geodesic: float = 1e-3
     lr_critic: float = 1e-5
@@ -13,7 +13,7 @@ class TrainingState:
     policy_freq: int = 16
     tau: float = 0.05
     eval_freq: int = 200
-    max_timesteps: float = 1e6
+    max_time_steps: float = 1e6
     data_generation_without_actor_iterations: int = 20
     qlearning_batch_size: int = 32
     """
@@ -21,7 +21,7 @@ class TrainingState:
     As the episodes will explore more, the Quality Network Q(a, s)
     will be able to learn from the distribution of the environment,
     ( P(a, s, a', s') and thus be more accurate and less brittle.
-    This will estabilize the learning of the policy network 
+    This will stabilize the learning of the policy network 
     as the action network will be as good as the quality network is.
     """
     initial_action_variance: int = 1e-3
@@ -45,7 +45,7 @@ class TrainingState:
     def can_save(self):
         return (self.t + 1) % self.save_freq == 0 and self.can_train_buffer()
 
-    def can_eval_policy(self):
+    def can_evaluate_policy(self):
         return (self.t + 1) % self.eval_freq == 0 and self.can_train_buffer()
 
     def batch_size(self):
@@ -54,19 +54,18 @@ class TrainingState:
 
 @dataclass
 class EpisodeState:
-    timesteps = 0
-    num = 0
     gamma = 0
     discounted_reward = None
     discounted_gamma = 0
     initial_reward = None
     done = None
 
-    def __init__(self, gamma):
+    def __init__(self, label, gamma):
+        self.label = label
         self.gamma = gamma
         self.discounted_gamma = gamma
 
-    def step(self, reward, done):
+    def step(self, reward, done, step, summary):
         self.done = done.detach().cpu()
         if self.initial_reward is None:
             self.initial_reward = reward.detach().cpu()
@@ -79,8 +78,23 @@ class EpisodeState:
         self.discounted_gamma *= self.gamma
         everything_is_done = self.done[self.done == 1].shape[0] == self.done.shape[0]
         if everything_is_done:
+            final_reward = reward.detach().cpu()
+            summary.add_scalar(
+                f"Loss / {self.label} / Final Reward to Initial Reward Ratio in {self.label}",
+                (final_reward / (self.initial_reward + 1e-10)).mean(),
+                step,
+            )
+            summary.add_scalar(
+                f"Loss / {self.label} / Accumulated Discontinued Reward in {self.label}",
+                self.discounted_reward.mean(),
+                step,
+            )
             self.create_new()
         return everything_is_done
 
     def create_new(self):
-        pass
+        self.gamma = 0
+        self.discounted_reward = None
+        self.discounted_gamma = 0
+        self.initial_reward = None
+        self.done = None
