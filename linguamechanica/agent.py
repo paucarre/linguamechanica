@@ -92,7 +92,7 @@ class IKAgent:
                 "actor_target": self.actor_target.state_dict(),
                 "actor": self.actor.state_dict(),
                 # Optimizers
-                # "actor_optimizer": self.actor_optimizer.state_dict(),
+                "actor_optimizer": self.actor_optimizer.state_dict(),
                 "actor_geodesic_optimizer": self.actor_geodesic_optimizer.state_dict(),
                 "actor_entropy_optimizer": self.actor_entropy_optimizer.state_dict(),
                 "critic_q1_optimizer": self.critic_q1_optimizer.state_dict(),
@@ -122,11 +122,11 @@ class IKAgent:
         agent.actor.load_state_dict(model_dictionary["actor"])
         agent.actor_target.load_state_dict(model_dictionary["actor_target"])
         # Optimizers
-        # agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
-        # agent.actor_geodesic_optimizer.load_state_dict(model_dictionary["actor_geodesic_optimizer"])
-        # agent.actor_entropy_optimizer.load_state_dict(model_dictionary["actor_entropy_optimizer"])
-        # agent.critic_q1_optimizer.load_state_dict(model_dictionary["critic_q1_optimizer"])
-        # agent.critic_q2_optimizer.load_state_dict(model_dictionary["critic_q2_optimizer"])
+        agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
+        agent.actor_geodesic_optimizer.load_state_dict(model_dictionary["actor_geodesic_optimizer"])
+        agent.actor_entropy_optimizer.load_state_dict(model_dictionary["actor_entropy_optimizer"])
+        agent.critic_q1_optimizer.load_state_dict(model_dictionary["critic_q1_optimizer"])
+        agent.critic_q2_optimizer.load_state_dict(model_dictionary["critic_q2_optimizer"])
         return agent
 
     def store_transition(self, state, action, reward, next_state, done):
