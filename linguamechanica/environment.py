@@ -53,19 +53,25 @@ class Environment:
         state[:, 6:] = self.current_thetas.detach()
         return state
 
+    @staticmethod
+    def thetas_target_pose_from_state(state):
+        return state[:, 6:], state[:, :6]
+
     def reset(self, summary=None):
-        self.target_parameters = self.uniformly_sample_parameters_within_constraints()
+        self.target_thetas = self.uniformly_sample_parameters_within_constraints()
         target_transformation = self.open_chain.forward_transformation(
-            self.target_parameters
+            self.target_thetas
         )
         self.target_pose = transforms.se3_log_map(target_transformation.get_matrix())
         self.noise_cte = 0.1 * self.training_state.level
-        noise = torch.randn_like(self.target_parameters) * self.noise_cte
-        self.current_thetas = (self.target_parameters.detach().clone() + noise).to(
+        noise = torch.randn_like(self.target_thetas) * self.noise_cte
+        self.current_thetas = (self.target_thetas.detach().clone() + noise).to(
             self.device
         )
-        self.pose_error_successful_threshold = 1.0 / (10 ** max(self.training_state.level, 0))
-        
+        self.pose_error_successful_threshold = 1.0 / (
+            10 ** max(self.training_state.level, 0)
+        )
+
         observation = self.generate_observation().to(self.device)
         self.current_step = torch.zeros(self.training_state.episode_batch_size, 1).to(
             self.device
@@ -101,7 +107,7 @@ class Environment:
             self.device
         )
 
-    def step(self, action, summary):
+    def step(self, action, summary=None):
         within_steps = self.current_step < self.training_state.max_steps_done
         self.current_step[within_steps] += 1
         self.current_thetas[:, :] += action[:, :]

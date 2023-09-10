@@ -74,10 +74,10 @@ class InverseKinematicsActor(nn.Module):
             )
         )
         self.fc_angle_mean = nn.Linear(
-                in_features=weights + on_manifold_count,
-                out_features=thetas_count,
-                bias=False,
-            )
+            in_features=weights + on_manifold_count,
+            out_features=thetas_count,
+            bias=False,
+        )
         torch.nn.init.uniform_(self.fc_angle_mean.weight, a=-1e-5, b=1e-5)
         # Standard deviation where the stdev are stored as learnable weights
         self.fc_angle_log_std_dev = nn.Parameter(torch.zeros(1, thetas_count))

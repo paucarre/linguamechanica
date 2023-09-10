@@ -6,7 +6,10 @@ from torchrl.data import ReplayBuffer
 from dataclasses import asdict
 import torch.optim as optim
 from torchrl.data.replay_buffers import ListStorage
-from pytorch3d import transforms
+from dacite import from_dict
+from linguamechanica.training_context import TrainingState
+import os
+from linguamechanica.environment import Environment
 
 
 def compute_geodesic_loss(thetas, target_pose, open_chain, weights):
@@ -15,10 +18,6 @@ def compute_geodesic_loss(thetas, target_pose, open_chain, weights):
         error_pose, weights.to(thetas.device)
     )
     return error.mean()
-
-
-def thetas_target_pose_from_state(state):
-    return state[:, 6:], state[:, :6]
 
 
 class IKAgent:
@@ -77,34 +76,58 @@ class IKAgent:
         )
 
     def save(self, training_state):
-        training_state_dict = asdict(self.training_state)
-        torch.save(
-            training_state_dict,
-            f"checkpoints/state_{self.training_state.t + 1}.pt",
-        )
-        model_dictionary = {
-            "critic_target_q1": self.critic_target_q1.state_dict(),
-            "critic_target_q2": self.critic_target_q2.state_dict(),
-            "critic_q1": self.critic_q1.state_dict(),
-            "critic_q2": self.critic_q2.state_dict(),
-            "actor_target": self.actor_target.state_dict(),
-            "actor": self.actor.state_dict(),
-        }
-        torch.save(
-            model_dictionary,
-            f"checkpoints/model_{self.training_state.t + 1}.pt",
-        )
+        checkpoint_path = f"checkpoints/model_{self.training_state.t + 1}.pt"
+        if not os.path.exists(checkpoint_path):
+            training_state_dict = asdict(self.training_state)
+            torch.save(
+                training_state_dict,
+                f"checkpoints/state_{self.training_state.t + 1}.pt",
+            )
+            model_dictionary = {
+                # Models
+                "critic_target_q1": self.critic_target_q1.state_dict(),
+                "critic_target_q2": self.critic_target_q2.state_dict(),
+                "critic_q1": self.critic_q1.state_dict(),
+                "critic_q2": self.critic_q2.state_dict(),
+                "actor_target": self.actor_target.state_dict(),
+                "actor": self.actor.state_dict(),
+                # Optimizers
+                # "actor_optimizer": self.actor_optimizer.state_dict(),
+                "actor_geodesic_optimizer": self.actor_geodesic_optimizer.state_dict(),
+                "actor_entropy_optimizer": self.actor_entropy_optimizer.state_dict(),
+                "critic_q1_optimizer": self.critic_q1_optimizer.state_dict(),
+                "critic_q2_optimizer": self.critic_q2_optimizer.state_dict(),
+            }
+            torch.save(
+                model_dictionary,
+                checkpoint_path,
+            )
 
-    def load(self, name):
-        model_dictionary = torch.load(f"checkpoints/model_{name}.pt")
-        self.critic_target_q1.load_state_dict(model_dictionary["critic_target_q1"])
-        self.critic_target_q2.load_state_dict(model_dictionary["critic_target_q2"])
-        self.critic_q1.load_state_dict(model_dictionary["critic_q1"])
-        self.critic_q2.load_state_dict(model_dictionary["critic_q2"])
-        self.actor.load_state_dict(model_dictionary["actor"])
-        self.actor_target.load_state_dict(model_dictionary["actor_target"])
-        training_state_dict = torch.load(f"checkpoints/state_{name}.pt")
-        return training_state_dict
+    @staticmethod
+    def from_checkpoint(open_chain, checkpoint_id, summary=None):
+        model_dictionary = torch.load(f"checkpoints/model_{checkpoint_id}.pt")
+        training_state_dict = torch.load(f"checkpoints/state_{checkpoint_id}.pt")
+        training_state = from_dict(data_class=TrainingState, data=training_state_dict)
+        training_state.t += 1
+        agent = IKAgent(
+            open_chain,
+            summary,
+            training_state,
+        )
+        # Models
+        agent.critic_target_q1.load_state_dict(model_dictionary["critic_target_q1"])
+        agent.critic_target_q2.load_state_dict(model_dictionary["critic_target_q2"])
+        agent.critic_q1.load_state_dict(model_dictionary["critic_q1"])
+        agent.critic_q2.load_state_dict(model_dictionary["critic_q2"])
+        agent.actor.load_state_dict(model_dictionary["actor"])
+        agent.actor_target.load_state_dict(model_dictionary["actor_target"])
+        # Optimizers
+        # agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
+        # agent.actor_geodesic_optimizer.load_state_dict(model_dictionary["actor_geodesic_optimizer"])
+        # agent.actor_entropy_optimizer.load_state_dict(model_dictionary["actor_entropy_optimizer"])
+        # agent.critic_q1_optimizer.load_state_dict(model_dictionary["critic_q1_optimizer"])
+        # agent.critic_q2_optimizer.load_state_dict(model_dictionary["critic_q2_optimizer"])
+        return agent
 
     def store_transition(self, state, action, reward, next_state, done):
         state = state.detach().cpu()
@@ -123,32 +146,32 @@ class IKAgent:
         self.critic_target_q2 = self.critic_target_q2.cuda()
         return self
 
-    def choose_action(self, state, training_state, summary=None):
+    def choose_action(self, state, training_state):
         mu_v, var_v = None, None
         state = state.to(self.open_chain.device)
-        current_thetas, target_pose = thetas_target_pose_from_state(state)
+        current_thetas, target_pose = Environment.thetas_target_pose_from_state(state)
         # TODO: this shouldn't be here
         self.actor = self.actor.cuda()
         actions_mean, actions, log_probabilities, entropy = self.actor(
             current_thetas, target_pose
         )
-        if summary is not None:
-            summary.add_scalar(
+        if self.summary is not None:
+            self.summary.add_scalar(
                 "Data / Action Mean",
                 actions.mean(),
                 training_state.t,
             )
-            summary.add_scalar(
+            self.summary.add_scalar(
                 "Data / Action Std",
                 actions.std(),
                 training_state.t,
             )
-            summary.add_scalar(
+            self.summary.add_scalar(
                 "Data / Log Prob. Mean",
                 log_probabilities.mean(),
                 training_state.t,
             )
-            summary.add_scalar(
+            self.summary.add_scalar(
                 "Data / Entropy Mean",
                 entropy.std(),
                 training_state.t,
@@ -182,23 +205,28 @@ class IKAgent:
 
     def delayed_actor_update(self, state):
         if self.total_it % self.training_state.policy_freq == 0:
-            current_thetas, target_pose = thetas_target_pose_from_state(state)
+            current_thetas, target_pose = Environment.thetas_target_pose_from_state(
+                state
+            )
             actions, _, _, _ = self.actor(current_thetas, target_pose)
             next_thetas = current_thetas + actions
             self.actor_optimizer.zero_grad()
             actor_q_learning_loss = -self.critic_q1(next_thetas, target_pose).mean()
-            self.summary.add_scalar(
-                "Train / Actor Q Learning Loss",
-                actor_q_learning_loss,
-                self.training_state.t,
-            )
+            if self.summary is not None:
+                self.summary.add_scalar(
+                    "Train / Actor Q Learning Loss",
+                    actor_q_learning_loss,
+                    self.training_state.t,
+                )
             actor_q_learning_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
             self.actor_optimizer.step()
 
     def critic_update(self, state, reward, next_state, done):
         with torch.no_grad():
-            next_thetas, next_target_pose = thetas_target_pose_from_state(next_state)
+            next_thetas, next_target_pose = Environment.thetas_target_pose_from_state(
+                next_state
+            )
             next_actions, _, _, _ = self.actor_target(next_thetas, next_target_pose)
             # Compute the target Q value
             next_next_thetas = next_thetas + next_actions
@@ -212,7 +240,7 @@ class IKAgent:
         self.critic_q1_optimizer.zero_grad()
         self.critic_q2_optimizer.zero_grad()
 
-        current_thetas, target_pose = thetas_target_pose_from_state(state)
+        current_thetas, target_pose = Environment.thetas_target_pose_from_state(state)
         current_Q1 = self.critic_q1(current_thetas, target_pose)
         current_Q2 = self.critic_q2(current_thetas, target_pose)
 
@@ -224,21 +252,13 @@ class IKAgent:
         torch.nn.utils.clip_grad_norm_(self.critic_q2.parameters(), 1.0)
         self.critic_q1_optimizer.step()
         self.critic_q2_optimizer.step()
-        self.summary.add_scalar(
-            "Train / Quality Loss (Q1 + Q2)",
-            quality_loss,
-            self.training_state.t,
-        )
+        if self.summary is not None:
+            self.summary.add_scalar(
+                "Train / Quality Loss (Q1 + Q2)",
+                quality_loss,
+                self.training_state.t,
+            )
 
-    def compute_fast_error_approximation(self, thetas, target_pose):
-        current_transformation = self.open_chain.forward_transformation(thetas)
-        current_pose = transforms.se3_log_map(current_transformation.get_matrix())
-        linear_loss = (current_pose[:, :3] - target_pose[:, :3]).abs().mean()
-        sin_loss = (current_pose[:, 3:] - target_pose[:, 3:]).sin().abs().mean()
-        cos_loss = ((current_pose[:, 3:] - target_pose[:, 3:]).cos() - 1.0).abs().mean()
-        return linear_loss + sin_loss + cos_loss
-
-    # TODO: this is duplicate code
     def compute_reward(self, thetas, target_pose):
         error_pose = self.open_chain.compute_error_pose(thetas, target_pose)
         pose_error = DifferentiableOpenChainMechanism.compute_weighted_error(
@@ -247,18 +267,19 @@ class IKAgent:
         return -pose_error.unsqueeze(1)
 
     def actor_geodesic_optimization(self, state, epsilon=1e-10):
-        thetas, target_pose = thetas_target_pose_from_state(state)
+        thetas, target_pose = Environment.thetas_target_pose_from_state(state)
         for rollout in range(self.training_state.geodesic_rollouts):
             angle_delta_mean, _, _, _ = self.actor(thetas, target_pose)
             thetas = thetas + angle_delta_mean
-        loss = -self.compute_reward( thetas=thetas, target_pose=target_pose).mean()
-        self.summary.add_scalar(
-            "Train / Actor Reward Loss",
-            loss,
-            self.training_state.t,
-        )
+        loss = -self.compute_reward(thetas=thetas, target_pose=target_pose).mean()
+        if self.summary is not None:
+            self.summary.add_scalar(
+                "Train / Actor Reward Loss",
+                loss,
+                self.training_state.t,
+            )
         self.actor_geodesic_optimizer.zero_grad()
-        loss.backward()        
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
         self.actor_geodesic_optimizer.step()
         return loss
@@ -273,16 +294,17 @@ class IKAgent:
         reward = reward.detach().clone().view(-1, reward.shape[2])
         next_state = next_state.detach().clone().view(-1, next_state.shape[2])
         done = done.detach().clone().view(-1, done.shape[2])
-        self.summary.add_scalar(
-            "Data / Train Action Mean",
-            action.mean(),
-            self.training_state.t,
-        )
-        self.summary.add_scalar(
-            "Data / Train Action Std",
-            action.std(),
-            self.training_state.t,
-        )
+        if self.summary is not None:
+            self.summary.add_scalar(
+                "Data / Train Action Mean",
+                action.mean(),
+                self.training_state.t,
+            )
+            self.summary.add_scalar(
+                "Data / Train Action Std",
+                action.std(),
+                self.training_state.t,
+            )
 
         action = action.to(self.actor.device())
         state = state.to(self.actor.device())
@@ -292,15 +314,16 @@ class IKAgent:
         return state, action, reward, next_state, done
 
     def actor_entropy_update(self, state):
-        current_thetas, target_pose = thetas_target_pose_from_state(state)
+        current_thetas, target_pose = Environment.thetas_target_pose_from_state(state)
         _, _, _, entropy = self.actor(current_thetas, target_pose)
         self.actor_entropy_optimizer.zero_grad()
         actor_entropy_loss = entropy.mean()
-        self.summary.add_scalar(
-            "Train / Actor Entropy Loss",
-            actor_entropy_loss,
-            self.training_state.t,
-        )
+        if self.summary is not None:
+            self.summary.add_scalar(
+                "Train / Actor Entropy Loss",
+                actor_entropy_loss,
+                self.training_state.t,
+            )
         actor_entropy_loss.backward()
         self.actor_entropy_optimizer.step()
 

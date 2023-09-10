@@ -11,7 +11,7 @@ class TrainingState:
     episode_batch_size: int = 1024
     max_std_dev = 0.002
     save_freq: int = 10000
-    lr_actor: float = 1e-6
+    lr_actor: float = 1e-4  # 1e-6
     lr_actor_geodesic: float = 1e-4
     lr_actor_entropy: float = 1e-6
     lr_critic: float = 1e-4
@@ -22,7 +22,7 @@ class TrainingState:
     max_time_steps: float = 1e6
     data_generation_without_actor_iterations: int = 20
     qlearning_batch_size: int = 32
-    max_action_clip: int = torch.pi
+    max_action_clip: float = torch.pi
     t: int = 0
     weights = torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
     max_steps_done: int = 20

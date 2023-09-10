@@ -352,8 +352,11 @@ class UrdfRobot:
 
 class UrdfRobotLibrary:
     def dobot_cr5():
+        return UrdfRobotLibrary.from_urdf_path("./urdf/cr5.urdf")
+
+    def from_urdf_path(urdf_path: str):
         urdf_data = None
-        with open("./urdf/cr5.urdf", "r") as urdf_file:
+        with open(urdf_path, "r") as urdf_file:
             urdf_data = urdf_file.read()
         name, links, joints = parse_urdf(
             urdf_data, mesh_path="./urdf/", package_dir="./urdf/", strict_check=True

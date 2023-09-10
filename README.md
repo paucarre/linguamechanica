@@ -11,11 +11,8 @@ Specifically, the inverse kinematics solver has the following features:
  The geodesic loss is formally defined as the (weighted) sum of the vee `se(3)` target pose with respect to the current pose.
  The all computations (forward kinematics, exponentiations, logarithms, etc) are differentiable and integrated into `PyTorch`'s `autograd`.
  - The actor training is two-folded: 
-    - As `IK` is a perfect-information game, the geodesic loss is used directly to train the actor.
-    - There is a `Q-Learning pair` network to deal with cases where the robot trajectory does
-    not create monotonically decreasing rewards (the robot increases the geodesic distance to the target
-    before getting closer until the `IK` problem is solved) and potential extensions of the project such as grasping.
-
+    - The geodesic loss is used directly to train the actor.
+    - There is a `Q-Learning pair` network.
 
 
 # Setup
@@ -30,6 +27,21 @@ source ./bin/install-env.sh
 To run unit tests:
 ```bash
 make test
+```
+
+To train inverse kinematics use:
+```bash
+python -m linguamechanica.test --urdf URDF_PATH
+```
+
+To train inverse kinematics from checkpoint use:
+```bash
+python -m linguamechanica.test --urdf URDF_PATH --checkpoint CHECKPOINT_ID
+```
+
+To test inverse kinematics from checkpoint use:
+```bash
+python -m linguamechanica.test --urdf URDF_PATH --checkpoint CHECKPOINT_ID
 ```
 
 # References
