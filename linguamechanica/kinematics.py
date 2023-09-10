@@ -84,6 +84,10 @@ class DifferentiableOpenChainMechanism:
         self.device = device
         return self
 
+    def cuda(self):
+        # TODO: this is not elegant
+        return self.to("cuda:0")
+
     def _jacobian_computation_forward(self, thetas):
         transformation = self.forward_transformation(thetas)
         twist = transforms.se3_log_map(transformation.get_matrix())

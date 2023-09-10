@@ -15,8 +15,6 @@ Specifically, the inverse kinematics solver has the following features:
     - There is a `Q-Learning pair` network to deal with cases where the robot trajectory does
     not create monotonically decreasing rewards (the robot increases the geodesic distance to the target
     before getting closer until the `IK` problem is solved) and potential extensions of the project such as grasping.
- - Coordinate systems are continuous. In practical terms, all `so(3)` pose elements and robot `theta` parameters 
- are represented as a (`sin`, `cos`) pairs ( angles don't suffer from discontinuities at zero and 2π ).
 
 
 

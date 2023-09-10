@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions.normal import Normal
 
 
 def compute_manifold_error(open_chain, thetas, target_pose):
@@ -30,51 +31,56 @@ def compute_manifold_error(open_chain, thetas, target_pose):
     return manifold_error
 
 
+def fc_init(layer, weight=1e-10, bias_const=0.0):
+    torch.nn.init.uniform_(layer.weight, a=-weight, b=weight)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+
 class InverseKinematicsActor(nn.Module):
-    def __init__(self, open_chain, max_variance, weights=128):
+    def __init__(self, open_chain, max_action, max_std_dev, weights=128):
         super(InverseKinematicsActor, self).__init__()
-        self.max_variance = max_variance
         self.open_chain = open_chain
+        self.max_action = max_action
+        self.max_std_dev = max_std_dev
         on_manifold_count = 9 + 9 + 6 + 6
         thetas_count = self.open_chain.screws.shape[0]
-        self.fc1 = nn.Linear(
-            in_features=on_manifold_count, out_features=weights, bias=True
+        self.fc1 = fc_init(
+            nn.Linear(in_features=on_manifold_count, out_features=weights, bias=True)
         )
-        self.fc2 = nn.Linear(
-            in_features=weights + on_manifold_count, out_features=weights, bias=True
+        self.fc2 = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count, out_features=weights, bias=True
+            )
         )
-        self.fc3 = nn.Linear(
-            in_features=weights + on_manifold_count, out_features=weights, bias=True
+        self.fc3 = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count, out_features=weights, bias=True
+            )
         )
-        self.fc4 = nn.Linear(
-            in_features=weights + on_manifold_count, out_features=weights, bias=True
+        self.fc4 = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count, out_features=weights, bias=True
+            )
         )
-        self.fc5 = nn.Linear(
-            in_features=weights + on_manifold_count, out_features=weights, bias=True
+        self.fc5 = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count, out_features=weights, bias=True
+            )
         )
-        self.fc6 = nn.Linear(
-            in_features=weights + on_manifold_count, out_features=weights, bias=True
+        self.fc6 = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count, out_features=weights, bias=True
+            )
         )
-        self.fc_cos = nn.Linear(
-            in_features=weights + on_manifold_count,
-            out_features=thetas_count,
-            bias=True,
-        )
-        self.fc_sin = nn.Linear(
-            in_features=weights + on_manifold_count,
-            out_features=thetas_count,
-            bias=True,
-        )
-        self.fc_cos_var = nn.Linear(
-            in_features=weights + on_manifold_count,
-            out_features=thetas_count,
-            bias=True,
-        )
-        self.fc_sin_var = nn.Linear(
-            in_features=weights + on_manifold_count,
-            out_features=thetas_count,
-            bias=True,
-        )
+        self.fc_angle_mean = nn.Linear(
+                in_features=weights + on_manifold_count,
+                out_features=thetas_count,
+                bias=False,
+            )
+        torch.nn.init.uniform_(self.fc_angle_mean.weight, a=-1e-5, b=1e-5)
+        # Standard deviation where the stdev are stored as learnable weights
+        self.fc_angle_log_std_dev = nn.Parameter(torch.zeros(1, thetas_count))
 
     def device(self):
         return self.fc1.weight.device
@@ -87,14 +93,22 @@ class InverseKinematicsActor(nn.Module):
         x = torch.cat([F.tanh(self.fc4(x)), manifold_error], 1)
         x = torch.cat([F.tanh(self.fc5(x)), manifold_error], 1)
         x = torch.cat([F.tanh(self.fc6(x)), manifold_error], 1)
-        # cos, sin output
-        cos = self.fc_cos(x).cos()
-        sin = self.fc_sin(x).sin()
-        # cos var, sin var output
-        cos_var = ((F.tanh(self.fc_cos_var(x)) + 1.0) / 2.0) * self.max_variance
-        sin_var = ((F.tanh(self.fc_sin_var(x)) + 1.0) / 2.0) * self.max_variance
-        return torch.cat([sin.unsqueeze(2), cos.unsqueeze(2)], 2), torch.cat(
-            [sin_var.unsqueeze(2), cos_var.unsqueeze(2)], 2
+        # Angle mean from -PI to PI
+        angle_delta_mean = self.fc_angle_mean(x)
+        # angle_delta_mean = self.fc_angle_mean(x)
+        action_log_std_dev = self.fc_angle_log_std_dev.expand_as(angle_delta_mean)
+        action_std_dev = torch.exp(action_log_std_dev)
+        action_std_dev = torch.clip(action_std_dev, -self.max_std_dev, self.max_std_dev)
+        angle_delta_probabilities = Normal(angle_delta_mean, action_std_dev)
+        angle_delta_action = angle_delta_probabilities.sample()
+        angle_delta_action = torch.clip(
+            angle_delta_action, -self.max_action, self.max_action
+        )
+        return (
+            angle_delta_mean,
+            angle_delta_action,
+            angle_delta_probabilities.log_prob(angle_delta_action).sum(1),
+            angle_delta_probabilities.entropy().sum(1),
         )
 
 
@@ -125,26 +139,38 @@ class InverseKinematicsCritic(nn.Module):
         super(InverseKinematicsCritic, self).__init__()
         self.open_chain = open_chain
         on_manifold_count = 9 + 9 + 6 + 6
-        self.fc1 = nn.Linear(
-            in_features=on_manifold_count, out_features=weights, bias=True
+        self.fc1 = fc_init(
+            nn.Linear(in_features=on_manifold_count, out_features=weights, bias=True)
         )
-        self.fc2 = nn.Linear(
-            in_features=weights + on_manifold_count, out_features=weights, bias=True
+        self.fc2 = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count, out_features=weights, bias=True
+            )
         )
-        self.fc3 = nn.Linear(
-            in_features=weights + on_manifold_count, out_features=weights, bias=True
+        self.fc3 = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count, out_features=weights, bias=True
+            )
         )
-        self.fc4 = nn.Linear(
-            in_features=weights + on_manifold_count, out_features=weights, bias=True
+        self.fc4 = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count, out_features=weights, bias=True
+            )
         )
-        self.fc5 = nn.Linear(
-            in_features=weights + on_manifold_count, out_features=weights, bias=True
+        self.fc5 = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count, out_features=weights, bias=True
+            )
         )
-        self.fc6 = nn.Linear(
-            in_features=weights + on_manifold_count, out_features=weights, bias=True
+        self.fc6 = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count, out_features=weights, bias=True
+            )
         )
-        self.fc_critic = nn.Linear(
-            in_features=weights + on_manifold_count, out_features=1, bias=True
+        self.fc_critic = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count, out_features=1, bias=True
+            )
         )
 
     def device(self):

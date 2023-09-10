@@ -4,11 +4,17 @@ import torch
 
 @dataclass
 class TrainingState:
-    episode_batch_size: int = 64
+    level: int = 1
+    geodesic_rollouts: int = 3
+    geodesic_threshold_done: float = 1e-6
+    # geodesic_threshold_to_train_actor_using_q_learning: float = 1e-3
+    episode_batch_size: int = 1024
+    max_std_dev = 0.002
     save_freq: int = 10000
-    lr_actor: float = 1e-5
-    lr_actor_geodesic: float = 1e-3
-    lr_critic: float = 1e-5
+    lr_actor: float = 1e-6
+    lr_actor_geodesic: float = 1e-4
+    lr_actor_entropy: float = 1e-6
+    lr_critic: float = 1e-4
     gamma: float = 0.99
     policy_freq: int = 16
     tau: float = 0.05
@@ -16,25 +22,19 @@ class TrainingState:
     max_time_steps: float = 1e6
     data_generation_without_actor_iterations: int = 20
     qlearning_batch_size: int = 32
-    """
-    The higher the noise, the more the episodes will explore.
-    As the episodes will explore more, the Quality Network Q(a, s)
-    will be able to learn from the distribution of the environment,
-    ( P(a, s, a', s') and thus be more accurate and less brittle.
-    This will stabilize the learning of the policy network 
-    as the action network will be as good as the quality network is.
-    """
-    initial_action_variance: int = 1e-3
-    max_variance: int = 1e-3
-    max_noise_clip: int = 1e-4
-    max_action: int = 0.2
+    max_action_clip: int = torch.pi
     t: int = 0
-    weights = torch.Tensor([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    weights = torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
     max_steps_done: int = 20
-    max_episodes_in_buffer: int = 50
+    max_episodes_in_buffer: int = 10
 
     def replay_buffer_max_size(self):
-        return self.max_episodes_in_buffer * self.max_steps_done
+        return (
+            self.max_episodes_in_buffer
+            * self.max_steps_done
+            * self.episode_batch_size
+            * self.qlearning_batch_size
+        )
 
     def can_train_buffer(self):
         return self.t >= self.data_generation_without_actor_iterations
@@ -43,10 +43,10 @@ class TrainingState:
         return self.t >= self.data_generation_without_actor_iterations
 
     def can_save(self):
-        return (self.t + 1) % self.save_freq == 0 and self.can_train_buffer()
+        return ((self.t + 1) % self.save_freq == 0) and self.can_train_buffer()
 
     def can_evaluate_policy(self):
-        return (self.t + 1) % self.eval_freq == 0 and self.can_train_buffer()
+        return ((self.t + 1) % self.eval_freq == 0) and self.can_train_buffer()
 
     def batch_size(self):
         return self.qlearning_batch_size
@@ -60,15 +60,14 @@ class EpisodeState:
     initial_reward = None
     done = None
 
-    def __init__(self, label, gamma):
+    def __init__(self, label, initial_reward, gamma):
         self.label = label
         self.gamma = gamma
+        self.initial_reward = initial_reward.detach().cpu()
         self.discounted_gamma = gamma
 
     def step(self, reward, done, step, summary):
         self.done = done.detach().cpu()
-        if self.initial_reward is None:
-            self.initial_reward = reward.detach().cpu()
         if self.discounted_reward is None:
             self.discounted_reward = reward.detach().cpu()
         else:
@@ -79,22 +78,23 @@ class EpisodeState:
         everything_is_done = self.done[self.done == 1].shape[0] == self.done.shape[0]
         if everything_is_done:
             final_reward = reward.detach().cpu()
+            """
+            How to interpret this:
+              => +2 : 2 times worse than initially (200% worsening)
+              => +1 : 1 time worse than initially  (100% worsening)
+              =>  0  : No improvement, final reward is equal to initial reward
+              => -1  : 100% improvement, final reward is zero
+            """
             summary.add_scalar(
-                f"Loss / {self.label} / Final Reward to Initial Reward Ratio in {self.label}",
-                (final_reward / (self.initial_reward + 1e-10)).mean(),
+                f"{self.label} / Reward Times Worse",
+                (
+                    (final_reward - self.initial_reward) / (self.initial_reward + 1e-10)
+                ).mean(),
                 step,
             )
             summary.add_scalar(
-                f"Loss / {self.label} / Accumulated Discontinued Reward in {self.label}",
+                f"{self.label} / Acc. Disc. Reward",
                 self.discounted_reward.mean(),
                 step,
             )
-            self.create_new()
         return everything_is_done
-
-    def create_new(self):
-        self.gamma = 0
-        self.discounted_reward = None
-        self.discounted_gamma = 0
-        self.initial_reward = None
-        self.done = None
