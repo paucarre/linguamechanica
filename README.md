@@ -31,12 +31,12 @@ make test
 
 To train inverse kinematics use:
 ```bash
-python -m linguamechanica.test --urdf URDF_PATH
+python -m linguamechanica.train --urdf URDF_PATH
 ```
 
 To train inverse kinematics from checkpoint use:
 ```bash
-python -m linguamechanica.test --urdf URDF_PATH --checkpoint CHECKPOINT_ID
+python -m linguamechanica.train --urdf URDF_PATH --checkpoint CHECKPOINT_ID
 ```
 
 To test inverse kinematics from checkpoint use:

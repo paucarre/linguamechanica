@@ -122,11 +122,20 @@ class IKAgent:
         agent.actor.load_state_dict(model_dictionary["actor"])
         agent.actor_target.load_state_dict(model_dictionary["actor_target"])
         # Optimizers
-        agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
-        agent.actor_geodesic_optimizer.load_state_dict(model_dictionary["actor_geodesic_optimizer"])
-        agent.actor_entropy_optimizer.load_state_dict(model_dictionary["actor_entropy_optimizer"])
-        agent.critic_q1_optimizer.load_state_dict(model_dictionary["critic_q1_optimizer"])
-        agent.critic_q2_optimizer.load_state_dict(model_dictionary["critic_q2_optimizer"])
+        if "actor_optimizer" in model_dictionary:
+            agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
+        agent.actor_geodesic_optimizer.load_state_dict(
+            model_dictionary["actor_geodesic_optimizer"]
+        )
+        agent.actor_entropy_optimizer.load_state_dict(
+            model_dictionary["actor_entropy_optimizer"]
+        )
+        agent.critic_q1_optimizer.load_state_dict(
+            model_dictionary["critic_q1_optimizer"]
+        )
+        agent.critic_q2_optimizer.load_state_dict(
+            model_dictionary["critic_q2_optimizer"]
+        )
         return agent
 
     def store_transition(self, state, action, reward, next_state, done):
@@ -259,19 +268,18 @@ class IKAgent:
                 self.training_state.t,
             )
 
-    def compute_reward(self, thetas, target_pose):
-        error_pose = self.open_chain.compute_error_pose(thetas, target_pose)
-        pose_error = DifferentiableOpenChainMechanism.compute_weighted_error(
-            error_pose, self.training_state.weights
-        )
-        return -pose_error.unsqueeze(1)
-
     def actor_geodesic_optimization(self, state, epsilon=1e-10):
         thetas, target_pose = Environment.thetas_target_pose_from_state(state)
         for rollout in range(self.training_state.geodesic_rollouts):
             angle_delta_mean, _, _, _ = self.actor(thetas, target_pose)
             thetas = thetas + angle_delta_mean
-        loss = -self.compute_reward(thetas=thetas, target_pose=target_pose).mean()
+        loss = (
+            -Environment.compute_reward(
+                self.open_chain, thetas, target_pose, self.training_state.weights
+            )
+            .to(self.device)
+            .mean()
+        )
         if self.summary is not None:
             self.summary.add_scalar(
                 "Train / Actor Reward Loss",

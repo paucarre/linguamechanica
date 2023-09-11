@@ -63,20 +63,23 @@ class Environment:
             self.target_thetas
         )
         self.target_pose = transforms.se3_log_map(target_transformation.get_matrix())
-        self.noise_cte = 0.1 * self.training_state.level
-        noise = torch.randn_like(self.target_thetas) * self.noise_cte
+        noise = (
+            torch.randn_like(self.target_thetas)
+            * self.training_state.initial_theta_std_dev()
+        )
         self.current_thetas = (self.target_thetas.detach().clone() + noise).to(
             self.device
         )
-        self.pose_error_successful_threshold = 1.0 / (
-            10 ** max(self.training_state.level, 0)
-        )
-
         observation = self.generate_observation().to(self.device)
         self.current_step = torch.zeros(self.training_state.episode_batch_size, 1).to(
             self.device
         )
-        self.initial_reward = self.compute_reward()[0]
+        self.initial_reward = Environment.compute_reward(
+            self.open_chain,
+            self.current_thetas,
+            self.target_pose,
+            self.training_state.weights,
+        ).to(self.device)
         if summary is not None:
             summary.add_scalar(
                 f"Env / Level",
@@ -85,45 +88,57 @@ class Environment:
             )
             summary.add_scalar(
                 f"Env / Noise Constant",
-                self.noise_cte,
+                self.training_state.initial_theta_std_dev(),
                 self.training_state.t,
             )
             summary.add_scalar(
                 f"Env / Success Threshold",
-                self.pose_error_successful_threshold,
+                self.training_state.pose_error_successful_threshold(),
                 self.training_state.t,
             )
         return observation, self.initial_reward
 
-    def compute_reward(self):
-        error_pose = self.open_chain.compute_error_pose(
-            self.current_thetas, self.target_pose
-        )
+    @staticmethod
+    def compute_reward(open_chain, thetas, target_pose, weights):
+        error_pose = open_chain.compute_error_pose(thetas, target_pose)
         pose_error = DifferentiableOpenChainMechanism.compute_weighted_error(
-            error_pose, self.training_state.weights
+            error_pose, weights
         )
-        done = pose_error < self.pose_error_successful_threshold
-        return -pose_error.unsqueeze(1).to(self.device), done.unsqueeze(1).to(
-            self.device
-        )
+        reward = -pose_error.unsqueeze(1)
+        return reward
+
+    def within_error_success(self, reward):
+        error_pose = -reward
+        return error_pose < self.training_state.pose_error_successful_threshold()
 
     def step(self, action, summary=None):
         within_steps = self.current_step < self.training_state.max_steps_done
         self.current_step[within_steps] += 1
         self.current_thetas[:, :] += action[:, :]
-        reward, done = self.compute_reward()
-        all_solutions_within_error_threshold = done[done == 1].shape[0] == done.shape[0]
-        if all_solutions_within_error_threshold:
+        reward = Environment.compute_reward(
+            self.open_chain,
+            self.current_thetas,
+            self.target_pose,
+            self.training_state.weights,
+        ).to(self.device)
+        is_success_reward = self.within_error_success(reward)
+        proportion_successful = float(
+            is_success_reward[is_success_reward == 1].shape[0]
+        ) / float(is_success_reward.shape[0])
+        if (
+            proportion_successful
+            >= self.training_state.proportion_successful_to_increase_level
+        ):
             self.training_state.level += 1
         if summary is not None:
             summary.add_scalar(
                 f"Env / Proportion Success",
-                float(done[done == 1].shape[0]) / float(done.shape[0]),
+                proportion_successful,
                 self.training_state.t,
             )
         observation = self.generate_observation()
         done = torch.logical_or(
-            done, self.current_step >= self.training_state.max_steps_done
+            is_success_reward, self.current_step >= self.training_state.max_steps_done
         )
         if summary is not None and done[done == 1].shape[0] > 0:
             summary.add_scalar(

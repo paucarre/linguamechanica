@@ -1,5 +1,5 @@
 #!/bin/bash
-pip uninstall poetry
+#pip uninstall poetry
 sudo apt install graphviz
 sudo apt-get install libreadline* libreadline*-dev libbz2-dev libssl-dev liblzma-dev libsqlite3-dev
 curl https://pyenv.run | bash

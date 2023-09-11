@@ -7,7 +7,7 @@ class TrainingState:
     level: int = 1
     geodesic_rollouts: int = 3
     geodesic_threshold_done: float = 1e-6
-    # geodesic_threshold_to_train_actor_using_q_learning: float = 1e-3
+    proportion_successful_to_increase_level: float = 0.7
     episode_batch_size: int = 1024
     max_std_dev = 0.002
     save_freq: int = 10000
@@ -27,6 +27,12 @@ class TrainingState:
     weights = torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
     max_steps_done: int = 20
     max_episodes_in_buffer: int = 10
+
+    def initial_theta_std_dev(self):
+        return 0.1 * self.level
+
+    def pose_error_successful_threshold(self):
+        return max(1.0 / (10 ** max(self.level, 0)), 0.0001)
 
     def replay_buffer_max_size(self):
         return (
