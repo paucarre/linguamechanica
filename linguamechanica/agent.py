@@ -273,13 +273,9 @@ class IKAgent:
         for rollout in range(self.training_state.geodesic_rollouts):
             angle_delta_mean, _, _, _ = self.actor(thetas, target_pose)
             thetas = thetas + angle_delta_mean
-        loss = (
-            -Environment.compute_reward(
-                self.open_chain, thetas, target_pose, self.training_state.weights
-            )
-            .to(self.device)
-            .mean()
-        )
+        loss = -Environment.compute_reward(
+            self.open_chain, thetas, target_pose, self.training_state.weights
+        ).mean()
         if self.summary is not None:
             self.summary.add_scalar(
                 "Train / Actor Reward Loss",
