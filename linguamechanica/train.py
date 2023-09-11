@@ -10,7 +10,7 @@ def evaluate_policy(open_chain, agent, training_state, summary):
     environment = Environment(
         open_chain=open_chain, training_state=training_state
     ).cuda()
-    state, initial_reward = environment.reset()
+    state, initial_reward = environment.reset_to_random_targets()
     episode = EpisodeState("Test", initial_reward, training_state.gamma)
     finished = False
     while not finished:
@@ -63,7 +63,7 @@ def train(checkpoint, urdf, level):
     if level is not None:
         agent.training_state.level = level
     env = Environment(open_chain=open_chain, training_state=training_state).cuda()
-    state, initial_reward = env.reset(summary)
+    state, initial_reward = env.reset_to_random_targets(summary)
     episode = EpisodeState("Train", initial_reward, training_state.gamma)
     for training_state.t in range(training_state.t, int(training_state.max_time_steps)):
         _, actions, _, _ = agent.choose_action(state, training_state)
@@ -71,7 +71,7 @@ def train(checkpoint, urdf, level):
         summary.add_scalar("Data / Step Batch Reward", reward.mean(), training_state.t)
         agent.store_transition(state, actions, reward, next_state, done)
         if episode.step(reward, done, training_state.t, summary):
-            state, initial_reward = env.reset(summary)
+            state, initial_reward = env.reset_to_random_targets(summary)
             episode = EpisodeState("Train", initial_reward, training_state.gamma)
         else:
             state = next_state

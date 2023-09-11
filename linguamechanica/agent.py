@@ -122,8 +122,7 @@ class IKAgent:
         agent.actor.load_state_dict(model_dictionary["actor"])
         agent.actor_target.load_state_dict(model_dictionary["actor_target"])
         # Optimizers
-        if "actor_optimizer" in model_dictionary:
-            agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
+        agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
         agent.actor_geodesic_optimizer.load_state_dict(
             model_dictionary["actor_geodesic_optimizer"]
         )

@@ -1,4 +1,3 @@
-import numpy as np
 import random
 import torch
 from pytorch3d import transforms
@@ -12,16 +11,14 @@ class Environment:
         """
         State dims should be for now:
             - Target pose, 6 
-            - Current thetas 6 
+            - Current thetas DoF(open_chain)
         """
-        self.state_dimensions = 12
-        self.action_dims = np.zeros(6).shape
-        self.current_steps = None
+        self.state_dimensions = 6 + self.open_chain.dof()
+        self.current_step = None
         # TODO: make this nicer
         self.device = "cuda:0"
         self.open_chain = self.open_chain.to(self.device)
         self.training_state.weights = self.training_state.weights.to(self.device)
-        self.noise_cte = 0.0
 
     def to(self, device):
         self.device = device
@@ -57,19 +54,22 @@ class Environment:
     def thetas_target_pose_from_state(state):
         return state[:, 6:], state[:, :6]
 
-    def reset(self, summary=None):
-        self.target_thetas = self.uniformly_sample_parameters_within_constraints()
-        target_transformation = self.open_chain.forward_transformation(
-            self.target_thetas
-        )
+    def reset_to_target_pose(self, target_pose, samples, summary=None):
+        target_thetas = target_theta.unsqueeze(1).repeat(samples, 1)
+        return self._reset(target_thetas, summary)
+
+    def reset_to_random_targets(self, summary=None):
+        target_thetas = self.uniformly_sample_parameters_within_constraints()
+        target_transformation = self.open_chain.forward_transformation(target_thetas)
         self.target_pose = transforms.se3_log_map(target_transformation.get_matrix())
         noise = (
-            torch.randn_like(self.target_thetas)
+            torch.randn_like(target_thetas)
             * self.training_state.initial_theta_std_dev()
         )
-        self.current_thetas = (self.target_thetas.detach().clone() + noise).to(
-            self.device
-        )
+        self.current_thetas = (target_thetas.detach().clone() + noise).to(self.device)
+        return self._reset(summary)
+
+    def _reset(self, summary=None):
         observation = self.generate_observation().to(self.device)
         self.current_step = torch.zeros(self.training_state.episode_batch_size, 1).to(
             self.device

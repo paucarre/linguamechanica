@@ -58,12 +58,13 @@ def setup_inference(robot_ids, urdf, checkpoint, samples, level):
         open_chain=open_chain, training_state=agent.training_state
     ).cuda()
     # set initial state
-    state, initial_reward = environment.reset()
+    target_pose = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    state, initial_reward = environment.reset_to_target_pose(target_pose)
     # TODO: this is a nasty hack
-    environment.target_pose = state[0:1, :6]
+    # environment.target_pose = state[0:1, :6]
     # TODO: this is a nasty hack
     # force target pose to be the same
-    state[:, :6] = state[0:1, :6]
+    # state[:, :6] = state[0:1, :6]
     thetas, target_pose = Environment.thetas_target_pose_from_state(state)
     for i in range(p.getNumJoints(robot_ids.robot_id)):
         p.resetJointState(robot_ids.robot_id, i, thetas[0, i].item())
@@ -72,6 +73,7 @@ def setup_inference(robot_ids, urdf, checkpoint, samples, level):
             robot_ids.target_robot_id, i, environment.target_thetas[0, i].item()
         )
     return environment, agent, state
+
 
 def solve_ik(robot_ids, iterations, state, agent, environment):
     iteration = 0
@@ -94,6 +96,7 @@ def solve_ik(robot_ids, iterations, state, agent, environment):
         iteration += 1
     while True:
         pass
+
 
 @click.command(context_settings=dict(help_option_names=["-h", "--help"]))
 @click.option(
@@ -133,7 +136,6 @@ def test(checkpoint, urdf, level, samples, iterations):
         robot_ids, urdf, checkpoint, samples, level
     )
     solve_ik(robot_ids, iterations, state, agent, environment)
-
 
 
 if __name__ == "__main__":
