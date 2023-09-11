@@ -15,7 +15,7 @@ Specifically, the inverse kinematics solver has the following features:
     - There is a `Q-Learning pair` network.
 
 
-# Setup
+# Tutorial
 Currently only **Ubuntu** is supported, but **PR**s to support other Linux distributions
 are welcomed but active efforts will be put on dockerizing the solution.
 
@@ -43,6 +43,17 @@ To test inverse kinematics from checkpoint use:
 ```bash
 python -m linguamechanica.test --urdf URDF_PATH --checkpoint CHECKPOINT_ID
 ```
+
+Example to test inverse kinematics using `target pose`:
+```bash
+python -m linguamechanica.test --checkpoint 214000 --target_pose 1.13,-0.935,-0.0869,0.466,-2.67,2.2
+```
+
+Example to test inverse kinematics using `target thetas`:
+```bash
+python -m linguamechanica.test --checkpoint 214000 --target_thetas 0.2,-0.4,0.2,-0.3,0.3,0.6
+```
+
 
 # References
  - [A micro Lie theory for state estimation in robotics](https://arxiv.org/pdf/1812.01537.pdf)

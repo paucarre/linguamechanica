@@ -54,19 +54,47 @@ class Environment:
     def thetas_target_pose_from_state(state):
         return state[:, 6:], state[:, :6]
 
-    def reset_to_target_pose(self, target_pose, samples, summary=None):
-        target_thetas = target_theta.unsqueeze(1).repeat(samples, 1)
-        return self._reset(target_thetas, summary)
+    def reset_to_target_pose(self, target_pose, summary=None):
+        samples = self.training_state.episode_batch_size
+        self.target_pose = target_pose.unsqueeze(0).repeat(samples, 1).to(self.device)
+        print("self.target_pose", target_pose.shape, self.target_pose.shape)
+        self.current_thetas = self.uniformly_sample_parameters_within_constraints()
+        return self._reset(summary)
+
+    def current_pose(self):
+        current_transformation = self.open_chain.forward_transformation(
+            self.current_thetas
+        )
+        return transforms.se3_log_map(current_transformation.get_matrix())
 
     def reset_to_random_targets(self, summary=None):
-        target_thetas = self.uniformly_sample_parameters_within_constraints()
-        target_transformation = self.open_chain.forward_transformation(target_thetas)
+        target_thetas_batch = self.uniformly_sample_parameters_within_constraints()
+        return self._reset_to_target_thetas_batch(
+            target_thetas_batch=target_thetas_batch
+        )
+
+    def reset_to_target_thetas(self, target_thetas, summary=None):
+        samples = self.training_state.episode_batch_size
+        target_thetas_batch = (
+            target_thetas.unsqueeze(0).repeat(samples, 1).to(self.device)
+        )
+        return self._reset_to_target_thetas_batch(
+            target_thetas_batch=target_thetas_batch
+        )
+
+    def _reset_to_target_thetas_batch(self, target_thetas_batch, summary=None):
+        self.target_thetas = target_thetas_batch
+        target_transformation = self.open_chain.forward_transformation(
+            self.target_thetas
+        )
         self.target_pose = transforms.se3_log_map(target_transformation.get_matrix())
         noise = (
-            torch.randn_like(target_thetas)
+            torch.randn_like(self.target_thetas)
             * self.training_state.initial_theta_std_dev()
         )
-        self.current_thetas = (target_thetas.detach().clone() + noise).to(self.device)
+        self.current_thetas = (self.target_thetas.detach().clone() + noise).to(
+            self.device
+        )
         return self._reset(summary)
 
     def _reset(self, summary=None):
