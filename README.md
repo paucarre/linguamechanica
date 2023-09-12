@@ -3,13 +3,10 @@
 ![Lingua Mechanica](https://media.giphy.com/media/SyVdwcA3UWGcHV20fS/giphy.gif)
 
 This projects solves the `inverse kinematics` problem by training a `Reinforcement Learning` model
-from a `URDF` description of a robotic arm.
+from a `URDF` description of a robotic arm. It is able to solve thousands of Inverse Kinematics in parallel
+ or create swarms of thousands of initial poses to solve a single inverse kinematics problem.
 
 Specifically, the inverse kinematics solver has the following features:
- - It uses directly the robot arm `URDF`.
- - It is able to solve thousands of Inverse Kinematics in parallel or create swarms of thousands of initial poses to solve a single inverse kinematics problem.
-
- From a technical standpoint it uses the following:
  - It translates the robot `URDF` into its exponential form, as a differentiable network that outputs forward kinematics.
  - The robot arm kinematic chain is part of the model. An advantage is that the optimizer has access to the robot's jacobian through backpropagation.
  - The `Reinforcement Learning` reward is the cumulative geodesic on `SE(3)`. The geodesic can 
