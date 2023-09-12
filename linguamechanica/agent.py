@@ -58,12 +58,10 @@ class IKAgent:
         self.total_it = 0
         self.create_optimizers()
 
-    def create_actor_geodesic_optimizer(self):
+    def create_optimizers(self):
         self.actor_geodesic_optimizer = optim.Adam(
             self.actor.parameters(), lr=self.training_state.lr_actor_geodesic()
         )
-
-    def create_optimizers(self):
         self.actor_optimizer = optim.Adam(
             self.actor.parameters(), lr=self.training_state.lr_actor
         )
@@ -76,7 +74,6 @@ class IKAgent:
         self.critic_q2_optimizer = optim.Adam(
             self.critic_q2.parameters(), lr=self.training_state.lr_critic
         )
-        self.create_actor_geodesic_optimizer()
 
     def save(self, training_state):
         checkpoint_path = f"checkpoints/model_{self.training_state.t + 1}.pt"
@@ -125,19 +122,19 @@ class IKAgent:
         agent.actor.load_state_dict(model_dictionary["actor"])
         agent.actor_target.load_state_dict(model_dictionary["actor_target"])
         # Optimizers
-        # agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
-        # agent.actor_geodesic_optimizer.load_state_dict(
-        #    model_dictionary["actor_geodesic_optimizer"]
-        # )
-        # agent.actor_entropy_optimizer.load_state_dict(
-        #    model_dictionary["actor_entropy_optimizer"]
-        # )
-        # agent.critic_q1_optimizer.load_state_dict(
-        #    model_dictionary["critic_q1_optimizer"]
-        # )
-        # agent.critic_q2_optimizer.load_state_dict(
-        #    model_dictionary["critic_q2_optimizer"]
-        # )
+        agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
+        agent.actor_geodesic_optimizer.load_state_dict(
+            model_dictionary["actor_geodesic_optimizer"]
+        )
+        agent.actor_entropy_optimizer.load_state_dict(
+            model_dictionary["actor_entropy_optimizer"]
+        )
+        agent.critic_q1_optimizer.load_state_dict(
+            model_dictionary["critic_q1_optimizer"]
+        )
+        agent.critic_q2_optimizer.load_state_dict(
+            model_dictionary["critic_q2_optimizer"]
+        )
         return agent
 
     def store_transition(self, state, action, reward, next_state, done):
@@ -358,7 +355,7 @@ class IKAgent:
 
     def train_buffer(self, level_increased):
         if level_increased:
-            self.create_actor_geodesic_optimizer()
+            self.create_optimizers()
         self.total_it += 1
         state, action, reward, next_state, done = self.sample_from_buffer()
         self.critic_update(state, reward, next_state, done)

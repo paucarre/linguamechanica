@@ -39,11 +39,9 @@ def setup_inference(urdf, checkpoint, samples, target_thetas, target_pose):
 
 
 def inference_results_to_csv(thetas_sorted, reward_sorted):
-    thetas_and_rewards_sorted = torch.cat(
-        [thetas_sorted, reward_sorted], 1
-    )
+    thetas_and_rewards_sorted = torch.cat([thetas_sorted, reward_sorted], 1)
     headers = [f"theta_{idx + 1}" for idx in range(thetas_sorted.shape[1])] + ["reward"]
-    thetas_and_rewards_sorted = [headers] + thetas_and_rewards_sorted.tolist()    
+    thetas_and_rewards_sorted = [headers] + thetas_and_rewards_sorted.tolist()
     thetas_and_rewards_sorted = "\n".join(
         [
             ",".join([str(theta) for theta in current_thetas])
