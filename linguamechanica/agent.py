@@ -58,12 +58,14 @@ class IKAgent:
         self.total_it = 0
         self.create_optimizers()
 
+    def create_actor_geodesic_optimizer(self):
+        self.actor_geodesic_optimizer = optim.Adam(
+            self.actor.parameters(), lr=self.training_state.lr_actor_geodesic()
+        )
+
     def create_optimizers(self):
         self.actor_optimizer = optim.Adam(
             self.actor.parameters(), lr=self.training_state.lr_actor
-        )
-        self.actor_geodesic_optimizer = optim.Adam(
-            self.actor.parameters(), lr=self.training_state.lr_actor_geodesic
         )
         self.actor_entropy_optimizer = optim.Adam(
             self.actor.parameters(), lr=self.training_state.lr_actor_entropy
@@ -74,6 +76,7 @@ class IKAgent:
         self.critic_q2_optimizer = optim.Adam(
             self.critic_q2.parameters(), lr=self.training_state.lr_critic
         )
+        self.create_actor_geodesic_optimizer()
 
     def save(self, training_state):
         checkpoint_path = f"checkpoints/model_{self.training_state.t + 1}.pt"
@@ -122,19 +125,19 @@ class IKAgent:
         agent.actor.load_state_dict(model_dictionary["actor"])
         agent.actor_target.load_state_dict(model_dictionary["actor_target"])
         # Optimizers
-        agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
-        agent.actor_geodesic_optimizer.load_state_dict(
-            model_dictionary["actor_geodesic_optimizer"]
-        )
-        agent.actor_entropy_optimizer.load_state_dict(
-            model_dictionary["actor_entropy_optimizer"]
-        )
-        agent.critic_q1_optimizer.load_state_dict(
-            model_dictionary["critic_q1_optimizer"]
-        )
-        agent.critic_q2_optimizer.load_state_dict(
-            model_dictionary["critic_q2_optimizer"]
-        )
+        # agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
+        # agent.actor_geodesic_optimizer.load_state_dict(
+        #    model_dictionary["actor_geodesic_optimizer"]
+        # )
+        # agent.actor_entropy_optimizer.load_state_dict(
+        #    model_dictionary["actor_entropy_optimizer"]
+        # )
+        # agent.critic_q1_optimizer.load_state_dict(
+        #    model_dictionary["critic_q1_optimizer"]
+        # )
+        # agent.critic_q2_optimizer.load_state_dict(
+        #    model_dictionary["critic_q2_optimizer"]
+        # )
         return agent
 
     def store_transition(self, state, action, reward, next_state, done):
@@ -153,6 +156,24 @@ class IKAgent:
         self.critic_target_q1 = self.critic_target_q1.cuda()
         self.critic_target_q2 = self.critic_target_q2.cuda()
         return self
+
+    def inference(self, iterations, state, environment, top_n):
+        iteration = 0
+        reward = None
+        while iteration < iterations:
+            thetas, target_pose = Environment.thetas_target_pose_from_state(state)
+            action_mean, actions, log_probabilities, entropy = self.choose_action(
+                state, self.training_state
+            )
+            actions, next_state, reward, done, level_increased = environment.step(
+                actions
+            )
+            state = next_state
+            iteration += 1
+        reward_sorted, indices = torch.sort(reward[:, 0], descending=True)
+        thetas_sorted = thetas[indices.to(thetas.device), :][:top_n, :]
+        reward_sorted = reward_sorted.to(thetas.device).unsqueeze(1)[:top_n, :]
+        return thetas_sorted, reward_sorted
 
     def choose_action(self, state, training_state):
         mu_v, var_v = None, None
@@ -269,7 +290,12 @@ class IKAgent:
 
     def actor_geodesic_optimization(self, state, epsilon=1e-10):
         thetas, target_pose = Environment.thetas_target_pose_from_state(state)
-        for rollout in range(self.training_state.geodesic_rollouts):
+        rollouts = min(
+            self.training_state.level,
+            self.training_state.max_steps_done,
+            self.training_state.geodesic_max_rollouts,
+        )
+        for rollout in range(rollouts):
             angle_delta_mean, _, _, _ = self.actor(thetas, target_pose)
             thetas = thetas + angle_delta_mean
         loss = -Environment.compute_reward(
@@ -330,7 +356,9 @@ class IKAgent:
         actor_entropy_loss.backward()
         self.actor_entropy_optimizer.step()
 
-    def train_buffer(self):
+    def train_buffer(self, level_increased):
+        if level_increased:
+            self.create_actor_geodesic_optimizer()
         self.total_it += 1
         state, action, reward, next_state, done = self.sample_from_buffer()
         self.critic_update(state, reward, next_state, done)

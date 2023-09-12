@@ -5,14 +5,14 @@ import torch
 @dataclass
 class TrainingState:
     level: int = 1
-    geodesic_rollouts: int = 3
+    geodesic_max_rollouts: int = 3
     geodesic_threshold_done: float = 1e-6
-    proportion_successful_to_increase_level: float = 0.7
+    proportion_successful_to_increase_level: float = 0.3
     episode_batch_size: int = 1024
     max_std_dev = 0.002
     save_freq: int = 10000
     lr_actor: float = 1e-4  # 1e-6
-    lr_actor_geodesic: float = 1e-4
+    lr_actor_geodesic_base: float = 1e-4
     lr_actor_entropy: float = 1e-6
     lr_critic: float = 1e-4
     gamma: float = 0.99
@@ -29,10 +29,13 @@ class TrainingState:
     max_episodes_in_buffer: int = 10
 
     def initial_theta_std_dev(self):
-        return 0.1 * self.level
+        return 1.0 * self.level
+
+    def lr_actor_geodesic(self):
+        return self.lr_actor_geodesic_base / (100.0 * self.level)
 
     def pose_error_successful_threshold(self):
-        return max(1.0 / (10 ** max(self.level, 0)), 0.0001)
+        return max(1.0 / (100.0 * self.level), 0.0001)
 
     def replay_buffer_max_size(self):
         return (

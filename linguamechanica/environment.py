@@ -57,7 +57,6 @@ class Environment:
     def reset_to_target_pose(self, target_pose, summary=None):
         samples = self.training_state.episode_batch_size
         self.target_pose = target_pose.unsqueeze(0).repeat(samples, 1).to(self.device)
-        print("self.target_pose", target_pose.shape, self.target_pose.shape)
         self.current_thetas = self.uniformly_sample_parameters_within_constraints()
         return self._reset(summary)
 
@@ -140,6 +139,7 @@ class Environment:
         return error_pose < self.training_state.pose_error_successful_threshold()
 
     def step(self, action, summary=None):
+        level_increased = False
         within_steps = self.current_step < self.training_state.max_steps_done
         self.current_step[within_steps] += 1
         self.current_thetas[:, :] += action[:, :]
@@ -158,6 +158,7 @@ class Environment:
             >= self.training_state.proportion_successful_to_increase_level
         ):
             self.training_state.level += 1
+            level_increased = True
         if summary is not None:
             summary.add_scalar(
                 f"Env / Proportion Success",
@@ -179,4 +180,4 @@ class Environment:
                 self.initial_reward[done == 1].mean(),
                 self.training_state.t,
             )
-        return action, observation, reward, done
+        return action, observation, reward, done, level_increased

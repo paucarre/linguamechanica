@@ -51,7 +51,7 @@ python -m linguamechanica.test --checkpoint 214000 --target_pose 1.13,-0.935,-0.
 
 Example to test inverse kinematics using `target thetas`:
 ```bash
-python -m linguamechanica.test --checkpoint 214000 --target_thetas 0.2,-0.4,0.2,-0.3,0.3,0.6
+python -m linguamechanica.test --checkpoint 214000 --target_thetas 0.5,-0.8,0.3,-0.5,0.5,0.6 
 ```
 
 

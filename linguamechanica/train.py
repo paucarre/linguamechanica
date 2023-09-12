@@ -17,7 +17,9 @@ def evaluate_policy(open_chain, agent, training_state, summary):
         action_mean, actions, log_probabilities, entropy = agent.choose_action(
             state, training_state
         )
-        actions, next_state, reward, done = environment.step(actions, summary=summary)
+        actions, next_state, reward, done, level_increased = environment.step(
+            actions, summary=summary
+        )
         finished = episode.step(reward, done, training_state.t, summary)
         state = next_state
 
@@ -67,7 +69,9 @@ def train(checkpoint, urdf, level):
     episode = EpisodeState("Train", initial_reward, training_state.gamma)
     for training_state.t in range(training_state.t, int(training_state.max_time_steps)):
         _, actions, _, _ = agent.choose_action(state, training_state)
-        actions, next_state, reward, done = env.step(actions, summary=summary)
+        actions, next_state, reward, done, level_increased = env.step(
+            actions, summary=summary
+        )
         summary.add_scalar("Data / Step Batch Reward", reward.mean(), training_state.t)
         agent.store_transition(state, actions, reward, next_state, done)
         if episode.step(reward, done, training_state.t, summary):
@@ -76,7 +80,7 @@ def train(checkpoint, urdf, level):
         else:
             state = next_state
         if training_state.can_train_buffer():
-            agent.train_buffer()
+            agent.train_buffer(level_increased)
         if training_state.can_evaluate_policy():
             evaluate_policy(open_chain, agent, training_state, summary)
         if training_state.can_save():

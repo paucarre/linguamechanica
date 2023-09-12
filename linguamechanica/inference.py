@@ -1,4 +1,3 @@
-
 from linguamechanica.kinematics import UrdfRobotLibrary
 from linguamechanica.environment import Environment
 from linguamechanica.agent import IKAgent
@@ -20,7 +19,7 @@ def target_pose_reset(environment, target_pose):
     return environment.reset_to_target_pose(target_pose)
 
 
-def setup_inference(robot_ids, urdf, checkpoint, samples, target_thetas, target_pose):
+def setup_inference(urdf, checkpoint, samples, target_thetas, target_pose):
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
     open_chain = urdf_robot.extract_open_chains(0.3)[-1].cuda()
     agent = IKAgent.from_checkpoint(
@@ -39,25 +38,19 @@ def setup_inference(robot_ids, urdf, checkpoint, samples, target_thetas, target_
     return environment, agent, state, initial_reward
 
 
-def solve_ik(robot_ids, iterations, state, agent, environment, initial_reward):
-    initial_reward.max()
-    iteration = 0
-    max_reward = None
-    while iteration < iterations:
-        thetas, target_pose = Environment.thetas_target_pose_from_state(state)
-        action_mean, actions, log_probabilities, entropy = agent.choose_action(
-            state, agent.training_state
-        )
-        actions, next_state, reward, done = environment.step(actions)
-        current_best_reward_idx = torch.argmax(reward, dim=0)
-        current_best_reward = reward[current_best_reward_idx, 0].item()
-        if max_reward is None or max_reward < current_best_reward:
-            max_reward = current_best_reward
-            max_thetas = thetas[current_best_reward_idx.to(thetas.device), :]
-        state = next_state
-        iteration += 1
-    while True:
-        pass
+def inference_results_to_csv(thetas_sorted, reward_sorted):
+    thetas_and_rewards_sorted = torch.cat(
+        [thetas_sorted, reward_sorted], 1
+    )
+    headers = [f"theta_{idx + 1}" for idx in range(thetas_sorted.shape[1])] + ["reward"]
+    thetas_and_rewards_sorted = [headers] + thetas_and_rewards_sorted.tolist()    
+    thetas_and_rewards_sorted = "\n".join(
+        [
+            ",".join([str(theta) for theta in current_thetas])
+            for current_thetas in thetas_and_rewards_sorted
+        ]
+    )
+    return thetas_and_rewards_sorted
 
 
 @click.command(context_settings=dict(help_option_names=["-h", "--help"]))
@@ -87,13 +80,17 @@ def solve_ik(robot_ids, iterations, state, agent, environment, initial_reward):
 )
 @click.option("--target_thetas", type=str, required=False)
 @click.option("--target_pose", type=str, required=False)
-def inference(checkpoint, urdf, samples, iterations, target_thetas, target_pose):
-    with_target_robot = target_thetas is not None
-    robot_ids = setup_pybullet(urdf, with_target_robot)
+@click.option("--top_n", type=int, default=10, required=True)
+def inference(checkpoint, urdf, samples, iterations, target_thetas, target_pose, top_n):
+    target_thetas is not None
     environment, agent, state, initial_reward = setup_inference(
-        robot_ids, urdf, checkpoint, samples, target_thetas, target_pose
+        urdf, checkpoint, samples, target_thetas, target_pose
     )
-    solve_ik(robot_ids, iterations, state, agent, environment, initial_reward)
+    thetas_sorted, reward_sorted = agent.inference(
+        iterations, state, environment, top_n
+    )
+    inference_csv = inference_results_to_csv(thetas_sorted, reward_sorted)
+    print(inference_csv)
 
 
 if __name__ == "__main__":

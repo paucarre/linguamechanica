@@ -6,9 +6,11 @@ from linguamechanica.environment import Environment
 from linguamechanica.agent import IKAgent
 from linguamechanica.environment import Environment
 from linguamechanica.kinematics import UrdfRobotLibrary
+from linguamechanica.inference import target_thetas_reset, target_pose_reset
 import click
 import logging
 import torch
+from pytorch3d import transforms
 
 
 @dataclass
@@ -30,32 +32,21 @@ def setup_pybullet(urdf, with_target_robot):
     p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
     robot_id = p.loadURDF(urdf, [0, 0, 0])
     target_robot_id = -1
+    initial_robot_id = -1
     if with_target_robot:
         target_robot_id = p.loadURDF(urdf, [0, 0, 0])
-    initial_robot_id = p.loadURDF(urdf, [0, 0, 0])
+        initial_robot_id = p.loadURDF(urdf, [0, 0, 0])
     for link in range(-1, 20):
         if with_target_robot:
             p.changeVisualShape(target_robot_id, link, rgbaColor=[0.1, 0.8, 0.4, 0.5])
+            p.changeVisualShape(initial_robot_id, link, rgbaColor=[0.5, 0.5, 0.5, 0.5])
         p.changeVisualShape(robot_id, link, rgbaColor=[0.1, 0.1, 0.8, 0.5])
-        p.changeVisualShape(initial_robot_id, link, rgbaColor=[0.5, 0.5, 0.5, 0.5])
     p.resetBasePositionAndOrientation(robot_id, [0, 0, 0], [0, 0, 0, 1])
     if with_target_robot:
         p.resetBasePositionAndOrientation(target_robot_id, [0, 0, 0], [0, 0, 0, 1])
-    p.resetBasePositionAndOrientation(initial_robot_id, [0, 0, 0], [0, 0, 0, 1])
+        p.resetBasePositionAndOrientation(initial_robot_id, [0, 0, 0], [0, 0, 0, 1])
     p.setGravity(0, 0, 0)
     return PyBulletRobotIds(robot_id, target_robot_id, initial_robot_id)
-
-
-def target_thetas_reset(environment, target_thetas):
-    target_thetas = [float(theta) for theta in target_thetas.split(",")]
-    target_thetas = torch.tensor(target_thetas)
-    return environment.reset_to_target_thetas(target_thetas)
-
-
-def target_pose_reset(environment, target_pose):
-    target_pose = [float(element) for element in target_pose.split(",")]
-    target_pose = torch.tensor(target_pose)
-    return environment.reset_to_target_pose(target_pose)
 
 
 def setup_inference(
@@ -81,10 +72,59 @@ def setup_inference(
     elif target_pose is not None:
         state, initial_reward = target_pose_reset(environment, target_pose)
     thetas, target_pose = Environment.thetas_target_pose_from_state(state)
+    draw_pose_as_axis(target_pose[0, :], robot_ids.robot_id)
     for i in range(p.getNumJoints(robot_ids.robot_id)):
         p.resetJointState(robot_ids.robot_id, i, thetas[0, i].item())
-        p.resetJointState(robot_ids.initial_robot_id, i, thetas[0, i].item())
+        # if robot_ids.initial_robot_id != -1:
+        #    p.resetJointState(robot_ids.initial_robot_id, i, thetas[0, i].item())
     return environment, agent, state, initial_reward
+
+
+def draw_pose_as_axis(
+    pose, parent_uid=0, life_time=0, len_damp=0.1, lineWidth=3.0, cd=1.0
+):
+    axis_coords = (
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+            ]
+        ).cuda()
+        @ transforms.se3_exp_map(pose.unsqueeze(0))[0, :, :]
+    )
+    po = axis_coords[0, :3].tolist()
+    px = (axis_coords[0, :3] + axis_coords[1, :3] * len_damp).tolist()
+    py = (axis_coords[0, :3] + axis_coords[2, :3] * len_damp).tolist()
+    pz = (axis_coords[0, :3] + axis_coords[3, :3] * len_damp).tolist()
+    p.addUserDebugLine(
+        po,
+        px,
+        lineColorRGB=[1 * cd, 0, 0],
+        lineWidth=lineWidth,
+        lifeTime=life_time,
+        parentObjectUniqueId=parent_uid,
+        parentLinkIndex=-1,
+    )
+    p.addUserDebugLine(
+        po,
+        py,
+        lineColorRGB=[0, 1 * cd, 0],
+        lineWidth=lineWidth,
+        lifeTime=life_time,
+        parentObjectUniqueId=parent_uid,
+        parentLinkIndex=-1,
+    )
+    p.addUserDebugLine(
+        po,
+        pz,
+        lineColorRGB=[0, 0, 1 * cd],
+        lineWidth=lineWidth,
+        lifeTime=life_time,
+        parentObjectUniqueId=parent_uid,
+        parentLinkIndex=-1,
+    )
 
 
 def solve_ik(robot_ids, iterations, state, agent, environment, initial_reward):
@@ -92,12 +132,13 @@ def solve_ik(robot_ids, iterations, state, agent, environment, initial_reward):
     max_initial_reward = initial_reward.max()
     iteration = 0
     max_reward = None
+    max_pose = None
     while iteration < iterations:
         thetas, target_pose = Environment.thetas_target_pose_from_state(state)
         action_mean, actions, log_probabilities, entropy = agent.choose_action(
             state, agent.training_state
         )
-        actions, next_state, reward, done = environment.step(actions)
+        actions, next_state, reward, done, _ = environment.step(actions)
         current_best_reward_idx = torch.argmax(reward, dim=0)
         current_best_reward = reward[current_best_reward_idx, 0].item()
         if max_reward is None or max_reward < current_best_reward:
@@ -112,6 +153,7 @@ def solve_ik(robot_ids, iterations, state, agent, environment, initial_reward):
             logger.info(f"Current thetas: {thetas_str}")
             pose = environment.current_pose()
             max_pose = pose[current_best_reward_idx.to(thetas.device), :]
+            draw_pose_as_axis(max_pose[0, :], robot_ids.robot_id, 0.2, 0.05, 1.0)
             pose_str = ", ".join([f"{theta:1.3}" for theta in max_pose[0, :].tolist()])
             logger.info(f"Current pose: {pose_str}")
             pose_str = ", ".join(
@@ -122,6 +164,7 @@ def solve_ik(robot_ids, iterations, state, agent, environment, initial_reward):
                 p.resetJointState(robot_ids.robot_id, i, max_thetas[0, i].item())
         state = next_state
         iteration += 1
+    draw_pose_as_axis(max_pose[0, :], robot_ids.robot_id, 0.0, 0.05, 3.0, 0.5)
     while True:
         pass
 
@@ -134,7 +177,7 @@ def solve_ik(robot_ids, iterations, state, agent, environment, initial_reward):
     "--level",
     help="IK Game Level (theta noise is '0.1 * level').",
     type=int,
-    default=3,
+    default=100,
     required=True,
 )
 @click.option(
