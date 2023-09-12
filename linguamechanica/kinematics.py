@@ -84,6 +84,9 @@ class DifferentiableOpenChainMechanism:
         self.device = device
         return self
 
+    def dof(self):
+        return self.screws.shape[0]
+
     def cuda(self):
         # TODO: this is not elegant
         return self.to("cuda:0")

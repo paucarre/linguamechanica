@@ -1,4 +1,3 @@
-import numpy as np
 import random
 import torch
 from pytorch3d import transforms
@@ -12,16 +11,14 @@ class Environment:
         """
         State dims should be for now:
             - Target pose, 6 
-            - Current thetas 6 
+            - Current thetas DoF(open_chain)
         """
-        self.state_dimensions = 12
-        self.action_dims = np.zeros(6).shape
-        self.current_steps = None
+        self.state_dimensions = 6 + self.open_chain.dof()
+        self.current_step = None
         # TODO: make this nicer
         self.device = "cuda:0"
         self.open_chain = self.open_chain.to(self.device)
         self.training_state.weights = self.training_state.weights.to(self.device)
-        self.noise_cte = 0.0
 
     def to(self, device):
         self.device = device
@@ -57,26 +54,59 @@ class Environment:
     def thetas_target_pose_from_state(state):
         return state[:, 6:], state[:, :6]
 
-    def reset(self, summary=None):
-        self.target_thetas = self.uniformly_sample_parameters_within_constraints()
+    def reset_to_target_pose(self, target_pose, summary=None):
+        samples = self.training_state.episode_batch_size
+        self.target_pose = target_pose.unsqueeze(0).repeat(samples, 1).to(self.device)
+        self.current_thetas = self.uniformly_sample_parameters_within_constraints()
+        return self._reset(summary)
+
+    def current_pose(self):
+        current_transformation = self.open_chain.forward_transformation(
+            self.current_thetas
+        )
+        return transforms.se3_log_map(current_transformation.get_matrix())
+
+    def reset_to_random_targets(self, summary=None):
+        target_thetas_batch = self.uniformly_sample_parameters_within_constraints()
+        return self._reset_to_target_thetas_batch(
+            target_thetas_batch=target_thetas_batch
+        )
+
+    def reset_to_target_thetas(self, target_thetas, summary=None):
+        samples = self.training_state.episode_batch_size
+        target_thetas_batch = (
+            target_thetas.unsqueeze(0).repeat(samples, 1).to(self.device)
+        )
+        return self._reset_to_target_thetas_batch(
+            target_thetas_batch=target_thetas_batch
+        )
+
+    def _reset_to_target_thetas_batch(self, target_thetas_batch, summary=None):
+        self.target_thetas = target_thetas_batch
         target_transformation = self.open_chain.forward_transformation(
             self.target_thetas
         )
         self.target_pose = transforms.se3_log_map(target_transformation.get_matrix())
-        self.noise_cte = 0.1 * self.training_state.level
-        noise = torch.randn_like(self.target_thetas) * self.noise_cte
+        noise = (
+            torch.randn_like(self.target_thetas)
+            * self.training_state.initial_theta_std_dev()
+        )
         self.current_thetas = (self.target_thetas.detach().clone() + noise).to(
             self.device
         )
-        self.pose_error_successful_threshold = 1.0 / (
-            10 ** max(self.training_state.level, 0)
-        )
+        return self._reset(summary)
 
+    def _reset(self, summary=None):
         observation = self.generate_observation().to(self.device)
         self.current_step = torch.zeros(self.training_state.episode_batch_size, 1).to(
             self.device
         )
-        self.initial_reward = self.compute_reward()[0]
+        self.initial_reward = Environment.compute_reward(
+            self.open_chain,
+            self.current_thetas,
+            self.target_pose,
+            self.training_state.weights,
+        ).to(self.device)
         if summary is not None:
             summary.add_scalar(
                 f"Env / Level",
@@ -85,45 +115,59 @@ class Environment:
             )
             summary.add_scalar(
                 f"Env / Noise Constant",
-                self.noise_cte,
+                self.training_state.initial_theta_std_dev(),
                 self.training_state.t,
             )
             summary.add_scalar(
                 f"Env / Success Threshold",
-                self.pose_error_successful_threshold,
+                self.training_state.pose_error_successful_threshold(),
                 self.training_state.t,
             )
         return observation, self.initial_reward
 
-    def compute_reward(self):
-        error_pose = self.open_chain.compute_error_pose(
-            self.current_thetas, self.target_pose
-        )
+    @staticmethod
+    def compute_reward(open_chain, thetas, target_pose, weights):
+        error_pose = open_chain.compute_error_pose(thetas, target_pose)
         pose_error = DifferentiableOpenChainMechanism.compute_weighted_error(
-            error_pose, self.training_state.weights
+            error_pose, weights
         )
-        done = pose_error < self.pose_error_successful_threshold
-        return -pose_error.unsqueeze(1).to(self.device), done.unsqueeze(1).to(
-            self.device
-        )
+        reward = -pose_error.unsqueeze(1)
+        return reward
+
+    def within_error_success(self, reward):
+        error_pose = -reward
+        return error_pose < self.training_state.pose_error_successful_threshold()
 
     def step(self, action, summary=None):
+        level_increased = False
         within_steps = self.current_step < self.training_state.max_steps_done
         self.current_step[within_steps] += 1
         self.current_thetas[:, :] += action[:, :]
-        reward, done = self.compute_reward()
-        all_solutions_within_error_threshold = done[done == 1].shape[0] == done.shape[0]
-        if all_solutions_within_error_threshold:
+        reward = Environment.compute_reward(
+            self.open_chain,
+            self.current_thetas,
+            self.target_pose,
+            self.training_state.weights,
+        ).to(self.device)
+        is_success_reward = self.within_error_success(reward)
+        proportion_successful = float(
+            is_success_reward[is_success_reward == 1].shape[0]
+        ) / float(is_success_reward.shape[0])
+        if (
+            proportion_successful
+            >= self.training_state.proportion_successful_to_increase_level
+        ):
             self.training_state.level += 1
+            level_increased = True
         if summary is not None:
             summary.add_scalar(
                 f"Env / Proportion Success",
-                float(done[done == 1].shape[0]) / float(done.shape[0]),
+                proportion_successful,
                 self.training_state.t,
             )
         observation = self.generate_observation()
         done = torch.logical_or(
-            done, self.current_step >= self.training_state.max_steps_done
+            is_success_reward, self.current_step >= self.training_state.max_steps_done
         )
         if summary is not None and done[done == 1].shape[0] > 0:
             summary.add_scalar(
@@ -136,4 +180,4 @@ class Environment:
                 self.initial_reward[done == 1].mean(),
                 self.training_state.t,
             )
-        return action, observation, reward, done
+        return action, observation, reward, done, level_increased

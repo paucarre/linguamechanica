@@ -43,7 +43,7 @@ class InverseKinematicsActor(nn.Module):
         self.open_chain = open_chain
         self.max_action = max_action
         self.max_std_dev = max_std_dev
-        on_manifold_count = 9 + 9 + 6 + 6
+        on_manifold_count = 18 + (2 * self.open_chain.dof())
         thetas_count = self.open_chain.screws.shape[0]
         self.fc1 = fc_init(
             nn.Linear(in_features=on_manifold_count, out_features=weights, bias=True)
@@ -138,7 +138,7 @@ class InverseKinematicsCritic(nn.Module):
     def __init__(self, open_chain, weights=128):
         super(InverseKinematicsCritic, self).__init__()
         self.open_chain = open_chain
-        on_manifold_count = 9 + 9 + 6 + 6
+        on_manifold_count = 18 + (2 * self.open_chain.dof())
         self.fc1 = fc_init(
             nn.Linear(in_features=on_manifold_count, out_features=weights, bias=True)
         )
