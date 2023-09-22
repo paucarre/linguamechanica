@@ -1,6 +1,8 @@
 import random
+
 import torch
 from pytorch3d import transforms
+
 from linguamechanica.kinematics import DifferentiableOpenChainMechanism
 
 
@@ -33,10 +35,15 @@ class Environment:
         for sample_idx in range(self.training_state.episode_batch_size):
             coordinates = []
             for i in range(len(self.open_chain.joint_limits)):
+                """
+                TODO: use constraints once they are properly tested...
+                self.open_chain.joint_limits[i][0],
+                self.open_chain.joint_limits[i][1])
+                """
                 coordinates.append(
                     random.uniform(
-                        self.open_chain.joint_limits[i][0],
-                        self.open_chain.joint_limits[i][1],
+                        -torch.pi,
+                        torch.pi,
                     )
                 )
             samples.append(torch.Tensor(coordinates).unsqueeze(0))
@@ -126,10 +133,13 @@ class Environment:
         return observation, self.initial_reward
 
     @staticmethod
-    def compute_reward(open_chain, thetas, target_pose, weights):
-        error_pose = open_chain.compute_error_pose(thetas, target_pose)
+    def compute_reward(open_chain, thetas, target_pose, weights, summary=None, t=None):
+        error_pose = open_chain.compute_error_pose(
+            thetas, target_pose, summary=summary, t=t
+        )
         pose_error = DifferentiableOpenChainMechanism.compute_weighted_error(
-            error_pose, weights
+            error_pose,
+            weights,
         )
         reward = -pose_error.unsqueeze(1)
         return reward

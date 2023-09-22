@@ -1,10 +1,9 @@
-from linguamechanica.kinematics import UrdfRobotLibrary
-from linguamechanica.environment import Environment
+import click
+import torch
+
 from linguamechanica.agent import IKAgent
 from linguamechanica.environment import Environment
 from linguamechanica.kinematics import UrdfRobotLibrary
-import click
-import torch
 
 
 def target_thetas_reset(environment, target_thetas):

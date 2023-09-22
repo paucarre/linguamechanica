@@ -1,18 +1,18 @@
+import matplotlib.pyplot as plt
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from pytorch3d import transforms
 from pytransform3d.transformations import (
     exponential_coordinates_from_transform,
     invert_transform,
 )
 from pytransform3d.urdf import (
     UrdfTransformManager,
-    parse_urdf,
     initialize_urdf_transform_manager,
+    parse_urdf,
 )
-import matplotlib.pyplot as plt
-import torch
-import torch.nn as nn
-from pytorch3d import transforms
-import torch.optim as optim
 
 
 def to_left_multiplied(right_multiplied):
@@ -107,7 +107,7 @@ class DifferentiableOpenChainMechanism:
         pose = transforms.se3_log_map(current_transformation.get_matrix())
         return pose, error_pose
 
-    def compute_error_pose(self, thetas, target_pose):
+    def compute_error_pose(self, thetas, target_pose, summary=None, t=None):
         current_transformation = self.forward_transformation(thetas)
         target_transformation = transforms.se3_exp_map(target_pose)
         current_trans_to_target = current_transformation.compose(
@@ -115,6 +115,23 @@ class DifferentiableOpenChainMechanism:
         )
         current_trans_to_target = current_trans_to_target.to(thetas.device).get_matrix()
         error_pose = transforms.se3_log_map(current_trans_to_target)
+        error_pose_transformation_rec = transforms.se3_exp_map(error_pose)
+        error_pose_rec = transforms.se3_log_map(error_pose_transformation_rec)
+        if summary is not None:
+            proportional_error = (
+                (error_pose - error_pose_rec).abs() / (error_pose.abs())
+            ).mean(1)
+            max_proportional_error, idx = proportional_error.max(0)
+            if max_proportional_error.mean() > 1e-1:
+                torch.set_printoptions(precision=20)
+                print("ERROR POSE")
+                print(error_pose[idx, :].data)
+                print(max_proportional_error.data)
+            summary.add_scalar(
+                "Debugging / Error pose reconstruction",
+                max_proportional_error.mean(),
+                t,
+            )
         return error_pose
 
     def compute_weighted_error(error_pose, weights):

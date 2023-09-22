@@ -1,16 +1,15 @@
-import pybullet as p
+import logging
 from dataclasses import dataclass
 
-from linguamechanica.kinematics import UrdfRobotLibrary
-from linguamechanica.environment import Environment
-from linguamechanica.agent import IKAgent
-from linguamechanica.environment import Environment
-from linguamechanica.kinematics import UrdfRobotLibrary
-from linguamechanica.inference import target_thetas_reset, target_pose_reset
 import click
-import logging
+import pybullet as p
 import torch
 from pytorch3d import transforms
+
+from linguamechanica.agent import IKAgent
+from linguamechanica.environment import Environment
+from linguamechanica.inference import target_pose_reset, target_thetas_reset
+from linguamechanica.kinematics import UrdfRobotLibrary
 
 
 @dataclass

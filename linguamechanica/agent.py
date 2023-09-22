@@ -1,15 +1,19 @@
+import math
+import os
+from dataclasses import asdict
+
 import torch
 import torch.nn.functional as F
+import torch.optim as optim
+from dacite import from_dict
+from torchmetrics.aggregation import RunningMean
+from torchrl.data import ReplayBuffer
+from torchrl.data.replay_buffers import ListStorage
+
+from linguamechanica.environment import Environment
 from linguamechanica.kinematics import DifferentiableOpenChainMechanism
 from linguamechanica.models import InverseKinematicsActor, InverseKinematicsCritic
-from torchrl.data import ReplayBuffer
-from dataclasses import asdict
-import torch.optim as optim
-from torchrl.data.replay_buffers import ListStorage
-from dacite import from_dict
 from linguamechanica.training_context import TrainingState
-import os
-from linguamechanica.environment import Environment
 
 
 def compute_geodesic_loss(thetas, target_pose, open_chain, weights):
@@ -57,6 +61,8 @@ class IKAgent:
         )
         self.total_it = 0
         self.create_optimizers()
+        self.actor_q_loss_running_mean = RunningMean(window=500).to(open_chain.device)
+        self.q_loss_running_mean = RunningMean(window=500).to(open_chain.device)
 
     def create_optimizers(self):
         self.actor_geodesic_optimizer = optim.Adam(
@@ -152,6 +158,7 @@ class IKAgent:
         self.critic_q2 = self.critic_q2.cuda()
         self.critic_target_q1 = self.critic_target_q1.cuda()
         self.critic_target_q2 = self.critic_target_q2.cuda()
+        self.actor_q_loss_running_mean = self.actor_q_loss_running_mean.cuda()
         return self
 
     def inference(self, iterations, state, environment, top_n):
@@ -205,7 +212,7 @@ class IKAgent:
         return actions_mean, actions, log_probabilities, entropy
 
     def update_target_models(self):
-        if self.total_it % self.training_state.policy_freq == 0:
+        if self.total_it % self.training_state.target_update_freq() == 0:
             for param, target_param in zip(
                 self.critic_q1.parameters(), self.critic_target_q1.parameters()
             ):
@@ -237,15 +244,56 @@ class IKAgent:
             actions, _, _, _ = self.actor(current_thetas, target_pose)
             next_thetas = current_thetas + actions
             self.actor_optimizer.zero_grad()
-            actor_q_learning_loss = -self.critic_q1(next_thetas, target_pose).mean()
+            critic_prediction = self.critic_q1(next_thetas, target_pose)
+            current_actor_q_loss_running_mean = self.actor_q_loss_running_mean.compute()
+            actor_q_learning_loss = -critic_prediction.mean()
             if self.summary is not None:
                 self.summary.add_scalar(
                     "Train / Actor Q Learning Loss",
                     actor_q_learning_loss,
                     self.training_state.t,
                 )
+            actor_q_learning_loss_derivative_error = (
+                current_actor_q_loss_running_mean - actor_q_learning_loss
+            ).abs() / (current_actor_q_loss_running_mean.abs() + 1e-6)
+            if self.summary is not None:
+                self.summary.add_scalar(
+                    "Train / Actor Q Learning Derivative Error",
+                    actor_q_learning_loss_derivative_error,
+                    self.training_state.t,
+                )
+            actor_q_learning_derivative_correction = 1.0 / max(
+                1.0, 100.0 * actor_q_learning_loss_derivative_error
+            )
+            if self.summary is not None:
+                self.summary.add_scalar(
+                    "Train / Actor Q Learning Derivative Correction",
+                    actor_q_learning_derivative_correction,
+                    self.training_state.t,
+                )
+            self.actor_q_loss_running_mean(actor_q_learning_loss)
+            # Only use derivative loss regulation if there is a down-regulation (dampening)
+            if (
+                not math.isnan(actor_q_learning_derivative_correction)
+                and actor_q_learning_derivative_correction < 1.0
+            ):
+                actor_q_learning_loss = (
+                    actor_q_learning_loss * actor_q_learning_derivative_correction
+                )
+            if self.summary is not None:
+                self.summary.add_scalar(
+                    "Train / Actor Q Learning Loss Corrected",
+                    actor_q_learning_loss,
+                    self.training_state.t,
+                )
             actor_q_learning_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(
+                self.actor.parameters(),
+                min(
+                    self.training_state.delayed_actor_grad_clip(),
+                    actor_q_learning_derivative_correction,
+                ),
+            )
             self.actor_optimizer.step()
 
     def critic_update(self, state, reward, next_state, done):
@@ -273,9 +321,14 @@ class IKAgent:
         quality_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(
             current_Q2, target_Q
         )
+        self.q_loss_running_mean(quality_loss)
         quality_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.critic_q1.parameters(), 1.0)
-        torch.nn.utils.clip_grad_norm_(self.critic_q2.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(
+            self.critic_q1.parameters(), self.training_state.critic_clip()
+        )
+        torch.nn.utils.clip_grad_norm_(
+            self.critic_q2.parameters(), self.training_state.critic_clip()
+        )
         self.critic_q1_optimizer.step()
         self.critic_q2_optimizer.step()
         if self.summary is not None:
@@ -285,28 +338,46 @@ class IKAgent:
                 self.training_state.t,
             )
 
-    def actor_geodesic_optimization(self, state, epsilon=1e-10):
+    def actor_geodesic_optimization(self, state, epsilon=1e-3):
         thetas, target_pose = Environment.thetas_target_pose_from_state(state)
-        rollouts = min(
-            self.training_state.level,
-            self.training_state.max_steps_done,
-            self.training_state.geodesic_max_rollouts,
-        )
-        for rollout in range(rollouts):
+        initial_reward = Environment.compute_reward(
+            self.open_chain, thetas, target_pose, self.training_state.weights
+        ).mean()
+        for rollout in range(
+            self.training_state.actor_geodesic_optimization_rollouts()
+        ):
             angle_delta_mean, _, _, _ = self.actor(thetas, target_pose)
             thetas = thetas + angle_delta_mean
-        loss = -Environment.compute_reward(
-            self.open_chain, thetas, target_pose, self.training_state.weights
+        final_reward = Environment.compute_reward(
+            self.open_chain,
+            thetas,
+            target_pose,
+            self.training_state.weights,
+            self.summary,
+            self.training_state.t,
         ).mean()
         if self.summary is not None:
             self.summary.add_scalar(
-                "Train / Actor Reward Loss",
+                "Train / Final Reward",
+                final_reward,
+                self.training_state.t,
+            )
+        # loss = -final_reward
+        reward_times_worse = (
+            (final_reward - initial_reward) / (initial_reward + epsilon)
+        ).mean()
+        loss = reward_times_worse
+        if self.summary is not None:
+            self.summary.add_scalar(
+                "Train / Actor Reward Times Worse Loss",
                 loss,
                 self.training_state.t,
             )
         self.actor_geodesic_optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(
+            self.actor.parameters(), self.training_state.gradient_clip_actor_geodesic()
+        )
         self.actor_geodesic_optimizer.step()
         return loss
 
@@ -353,13 +424,11 @@ class IKAgent:
         actor_entropy_loss.backward()
         self.actor_entropy_optimizer.step()
 
-    def train_buffer(self, level_increased):
-        if level_increased:
-            self.create_optimizers()
+    def train_buffer(self):
         self.total_it += 1
         state, action, reward, next_state, done = self.sample_from_buffer()
-        self.critic_update(state, reward, next_state, done)
         self.actor_geodesic_optimization(state)
+        self.critic_update(state, reward, next_state, done)
         self.delayed_actor_update(state)
         self.actor_entropy_update(state)
         self.update_target_models()
