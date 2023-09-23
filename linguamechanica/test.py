@@ -1,16 +1,15 @@
-import pybullet as p
+import logging
 from dataclasses import dataclass
 
-from linguamechanica.kinematics import UrdfRobotLibrary
-from linguamechanica.environment import Environment
-from linguamechanica.agent import IKAgent
-from linguamechanica.environment import Environment
-from linguamechanica.kinematics import UrdfRobotLibrary
-from linguamechanica.inference import target_thetas_reset, target_pose_reset
 import click
-import logging
+import pybullet as p
 import torch
 from pytorch3d import transforms
+
+from linguamechanica.agent import IKAgent
+from linguamechanica.environment import Environment
+from linguamechanica.inference import target_pose_reset, target_thetas_reset
+from linguamechanica.kinematics import UrdfRobotLibrary
 
 
 @dataclass
@@ -53,7 +52,9 @@ def setup_inference(
     robot_ids, urdf, checkpoint, samples, level, target_thetas, target_pose
 ):
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
-    open_chain = urdf_robot.extract_open_chains(0.3)[-1].cuda()
+    #TODO: make this generic
+    se3 = ProjectiveMatrix()
+    open_chain = urdf_robot.extract_open_chains(se3, 0.3)[-1].cuda()
     agent = IKAgent.from_checkpoint(
         open_chain=open_chain, checkpoint_id=checkpoint
     ).cuda()

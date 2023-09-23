@@ -1,6 +1,8 @@
 import random
+
 import torch
 from pytorch3d import transforms
+
 from linguamechanica.kinematics import DifferentiableOpenChainMechanism
 
 
@@ -33,10 +35,15 @@ class Environment:
         for sample_idx in range(self.training_state.episode_batch_size):
             coordinates = []
             for i in range(len(self.open_chain.joint_limits)):
+                """
+                TODO: use constraints once they are properly tested...
+                self.open_chain.joint_limits[i][0],
+                self.open_chain.joint_limits[i][1])
+                """
                 coordinates.append(
                     random.uniform(
-                        self.open_chain.joint_limits[i][0],
-                        self.open_chain.joint_limits[i][1],
+                        -torch.pi,
+                        torch.pi,
                     )
                 )
             samples.append(torch.Tensor(coordinates).unsqueeze(0))
@@ -61,10 +68,10 @@ class Environment:
         return self._reset(summary)
 
     def current_pose(self):
-        current_transformation = self.open_chain.forward_transformation(
+        current_transformation = self.open_chain.forward_kinematics(
             self.current_thetas
         )
-        return transforms.se3_log_map(current_transformation.get_matrix())
+        return self.open_chain.se3.log(current_transformation)
 
     def reset_to_random_targets(self, summary=None):
         target_thetas_batch = self.uniformly_sample_parameters_within_constraints()
@@ -83,10 +90,10 @@ class Environment:
 
     def _reset_to_target_thetas_batch(self, target_thetas_batch, summary=None):
         self.target_thetas = target_thetas_batch
-        target_transformation = self.open_chain.forward_transformation(
+        target_transformation = self.open_chain.forward_kinematics(
             self.target_thetas
         )
-        self.target_pose = transforms.se3_log_map(target_transformation.get_matrix())
+        self.target_pose = self.open_chain.se3.log(target_transformation)
         noise = (
             torch.randn_like(self.target_thetas)
             * self.training_state.initial_theta_std_dev()
@@ -126,10 +133,13 @@ class Environment:
         return observation, self.initial_reward
 
     @staticmethod
-    def compute_reward(open_chain, thetas, target_pose, weights):
-        error_pose = open_chain.compute_error_pose(thetas, target_pose)
+    def compute_reward(open_chain, thetas, target_pose, weights, summary=None, t=None):
+        error_pose = open_chain.compute_error_pose(
+            thetas, target_pose, summary=summary, t=t
+        )
         pose_error = DifferentiableOpenChainMechanism.compute_weighted_error(
-            error_pose, weights
+            error_pose,
+            weights,
         )
         reward = -pose_error.unsqueeze(1)
         return reward

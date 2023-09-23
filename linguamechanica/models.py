@@ -93,9 +93,7 @@ class InverseKinematicsActor(nn.Module):
         x = torch.cat([F.tanh(self.fc4(x)), manifold_error], 1)
         x = torch.cat([F.tanh(self.fc5(x)), manifold_error], 1)
         x = torch.cat([F.tanh(self.fc6(x)), manifold_error], 1)
-        # Angle mean from -PI to PI
         angle_delta_mean = self.fc_angle_mean(x)
-        # angle_delta_mean = self.fc_angle_mean(x)
         action_log_std_dev = self.fc_angle_log_std_dev.expand_as(angle_delta_mean)
         action_std_dev = torch.exp(action_log_std_dev)
         action_std_dev = torch.clip(action_std_dev, -self.max_std_dev, self.max_std_dev)

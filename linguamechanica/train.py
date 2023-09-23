@@ -1,9 +1,11 @@
-from linguamechanica.kinematics import UrdfRobotLibrary
-from linguamechanica.environment import Environment
-from linguamechanica.agent import IKAgent
-from torch.utils.tensorboard import SummaryWriter
-from linguamechanica.training_context import EpisodeState
 import click
+from torch.utils.tensorboard import SummaryWriter
+from linguamechanica.se3 import ProjectiveMatrix
+
+from linguamechanica.agent import IKAgent
+from linguamechanica.environment import Environment
+from linguamechanica.kinematics import UrdfRobotLibrary
+from linguamechanica.training_context import EpisodeState
 
 
 def evaluate_policy(open_chain, agent, training_state, summary):
@@ -47,7 +49,9 @@ def evaluate_policy(open_chain, agent, training_state, summary):
 )
 def train(checkpoint, urdf, level):
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
-    open_chain = urdf_robot.extract_open_chains(0.3)[-1].cuda()
+    #TODO: make this generic
+    se3 = ProjectiveMatrix()
+    open_chain = urdf_robot.extract_open_chains(se3, 0.3)[-1].cuda()
     summary = SummaryWriter()
     agent, training_state = None, None
     if checkpoint is None:
@@ -67,10 +71,10 @@ def train(checkpoint, urdf, level):
     env = Environment(open_chain=open_chain, training_state=training_state).cuda()
     state, initial_reward = env.reset_to_random_targets(summary)
     episode = EpisodeState("Train", initial_reward, training_state.gamma)
-    for training_state.t in range(training_state.t, int(training_state.max_time_steps)):
-        _, actions, _, _ = agent.choose_action(state, training_state)
+    while not training_state.training_is_finished():
+        actions_mean, actions, _, _ = agent.choose_action(state, training_state)
         actions, next_state, reward, done, level_increased = env.step(
-            actions, summary=summary
+            actions_mean, summary=summary
         )
         summary.add_scalar("Data / Step Batch Reward", reward.mean(), training_state.t)
         agent.store_transition(state, actions, reward, next_state, done)
@@ -80,12 +84,12 @@ def train(checkpoint, urdf, level):
         else:
             state = next_state
         if training_state.can_train_buffer():
-            agent.train_buffer(level_increased)
+            agent.train_buffer()
         if training_state.can_evaluate_policy():
             evaluate_policy(open_chain, agent, training_state, summary)
         if training_state.can_save():
             agent.save(training_state)
-
+        training_state.t += 1
     summary.close()
 
 
