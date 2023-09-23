@@ -9,6 +9,7 @@ from a `URDF` description of a robotic arm. It is able to solve thousands of Inv
 Specifically, the inverse kinematics solver has the following features:
  - It translates the robot `URDF` into its exponential form, as a differentiable network that outputs forward kinematics.
  - The robot arm kinematic chain is part of the model. An advantage is that the optimizer has access to the robot's jacobian through backpropagation.
+ - The `SE(3)` representation are [Implicit Dual Quaternions](http://www.neil.dantam.name/papers/dantam2020robust.pdf) ([Neil T. Dantam](http://www.neil.dantam.name/)), a fast and singularity-free compact `Dual-Quaternion` representation.
  - The `Reinforcement Learning` reward is the cumulative geodesic on `SE(3)`. The geodesic can 
  be weighted if desired ( note that for most collaborative arms the `T(3)` geodesic, in meters, is not far from π ).
  The geodesic loss is formally defined as the (weighted) sum of the vee `se(3)` target pose with respect to the current pose.
@@ -24,7 +25,7 @@ Specifically, the inverse kinematics solver has the following features:
 Currently only **Ubuntu** is supported, but **PR**s to support other Linux distributions
 are welcomed but active efforts will be put on dockerizing the solution.
 
-There are dependencies such as `pyenv` and several other Ubuntu dependencies that are required.
+There are dependencies such as `pyenv` and several other `Ubuntu` dependencies that are required.
 This script installs them:
 ```bash
 source ./bin/install-deps.sh

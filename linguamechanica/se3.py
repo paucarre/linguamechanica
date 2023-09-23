@@ -4,25 +4,31 @@ import torch
 
 
 class SE3:
-    def raise_error(self, name):
+    def raise_not_implemented_error(self, name):
         [cls.__name__ for cls in SE3.__subclasses__()]
         raise NotImplementedError(
             f"'{name}' not implemented in SE3 class. Use its subclasses: {subclassess}"
         )
 
     def exp(self, coordinates: torch.Tensor) -> torch.Tensor:
-        self.raise_error("exp")
+        self.raise_not_implemented_error("exp")
 
     def log(self, batched_vector_space: torch.Tensor) -> torch.Tensor:
-        self.raise_error("log")
+        self.raise_not_implemented_error("log")
 
-    def combine(
+    def chain(
         self, left_batched_SE3: torch.Tensor, right_batched_SE3: torch.Tensor
     ) -> torch.Tensor:
-        self.raise_error("combine")
+        self.raise_not_implemented_error("chain")
 
     def invert(self, batched_SE3: torch.Tensor) -> torch.Tensor:
-        self.raise_error("invert")
+        self.raise_not_implemented_error("invert")
+
+    def act_vector(self, idq: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
+        self.raise_not_implemented_error("act_vector")
+
+    def act_point(self, idq: torch.Tensor, point: torch.Tensor) -> torch.Tensor:
+        self.raise_not_implemented_error("act_point")
 
 
 class ImplicitDualQuaternion(SE3):
@@ -54,54 +60,43 @@ class ImplicitDualQuaternion(SE3):
         self.epsilon = epsilon
 
     def quat_mul(self, lh, rh):
-        h = torch.zeros_like(lh)
         ai, bi, ci, di = 3, 0, 1, 2
-        h[:, ai] = (
-            (lh[:, ai] * rh[:, ai])
-            - (lh[:, bi] * rh[:, bi])
-            - (lh[:, ci] * rh[:, ci])
-            - (lh[:, di] * rh[:, di])
+        la, lb, lc, ld = lh[:, ai], lh[:, bi], lh[:, ci], lh[:, di]
+        ra, rb, rc, rd = rh[:, ai], rh[:, bi], rh[:, ci], rh[:, di]
+        h_a = (la * ra) - (lb * rb) - (lc * rc) - (ld * rd)
+        h_b = (la * rb) + (lb * ra) + (lc * rd) - (ld * rc)
+        h_c = (la * rc) - (lb * rd) + (lc * ra) + (ld * rb)
+        h_d = (la * rd) + (lb * rc) - (lc * rb) + (ld * ra)
+        return torch.cat(
+            [h_b.unsqueeze(1), h_c.unsqueeze(1), h_d.unsqueeze(1), h_a.unsqueeze(1)], 1
         )
-        h[:, bi] = (
-            (lh[:, ai] * rh[:, bi])
-            + (lh[:, bi] * rh[:, ai])
-            + (lh[:, ci] * rh[:, di])
-            - (lh[:, di] * rh[:, ci])
-        )
-        h[:, ci] = (
-            (lh[:, ai] * rh[:, ci])
-            - (lh[:, ci] * rh[:, ai])
-            + (lh[:, ci] * rh[:, ai])
-            + (lh[:, di] * rh[:, bi])
-        )
-        h[:, di] = (
-            (lh[:, ai] * rh[:, di])
-            + (lh[:, bi] * rh[:, ci])
-            - (lh[:, ci] * rh[:, bi])
-            + (lh[:, di] * rh[:, ai])
-        )
-        return h
 
     def quat_conj(self, h):
-        return torch.cat([-h[:3], h[3:4]], 1)
+        return torch.cat([-h[:, :3], h[:, 3:4]], 1)
 
-    def combine(self, left_idq, right_idq):
+    def act_vector(self, idq, vector):
+        return self.quat_mul(idq, self.vect_to_quat(vector))[:3]
+
+    def chain(self, left_idq, right_idq):
         lh = self.extract_h(left_idq)
         rh = self.extract_h(right_idq)
-        h = quaternion_multiplication(lh, rh)
+        h = self.quat_mul(lh, rh)
         lv = self.extract_v(left_idq)
         rv = self.extract_v(right_idq)
-        ld = (1.0 / 2.0) * self.quat_mul(lv, lh)
-        rd = (1.0 / 2.0) * self.quat_mul(rv, rh)
-        d = self.quat_mul(lh, rd) + self.quat_mul(ld, rh)
-        v = 2.0 * self.quat_mul(d, quat_conj(h))
-        return torch.cat([h, v], 1)
+        v = self.quat_mul(
+            lh, self.quat_mul(self.vect_to_quat(rv), self.quat_conj(lh))
+        ) + self.vect_to_quat(lv)
+        # TODO: maybe normalize `h` just in case it numerically degrades?
+        return torch.cat([h, v[:, :3]], 1)
 
     def invert(idq):
         return self.quat_conj(idq)
 
-    def act(idq, pose):
-        pass
+    def vect_to_quat(self, vector):
+        return torch.cat([vector, torch.zeros_like(vector[:, 0:1])], 1)
+
+    def extract_v(self, idq):
+        return idq[:, 4:]
 
     def extract_h(self, idq):
         return idq[:, :4]
@@ -123,7 +118,7 @@ class ImplicitDualQuaternion(SE3):
         # and `omega_quartic`
         omega_square = omega * omega
         omega_quartic = omega_square * omega_square
-        mu_r_singularity = omega < self.epsilon
+        mu_r_singularity = omega.abs() < self.epsilon
         if mu_r_singularity[mu_r_singularity == True].shape[0] > 0:
             mu_r[mu_r_singularity] = (
                 1.0
@@ -135,8 +130,8 @@ class ImplicitDualQuaternion(SE3):
         if mu_d_singularity[mu_d_singularity == True].shape[0] > 0:
             mu_d[mu_d_singularity] = (
                 (4.0 / 3.0)
-                - (4.0 * omega_square[mu_d_singularity] / 15.0)
-                + (8.0 * omega_quartic[mu_d_singularity] / 315.0)
+                - ( ( 4.0 * omega_square[mu_d_singularity] ) / 15.0)
+                + ( ( 8.0 * omega_quartic[mu_d_singularity] ) / 315.0)
             )
         # TODO: this inner product should be computed w.o. einsum
         sigma = torch.einsum("bi,bi->b", coord_v, w).unsqueeze(1)
@@ -146,14 +141,9 @@ class ImplicitDualQuaternion(SE3):
         v = ((2.0 * mu_r) * cross) + (cos * 2.0 * mu_r * coord_v) + (mu_d * sigma * w)
         return torch.cat([h, v], 1)
 
-    @staticmethod
-    def as_dual_quaternion():
-        # return h + (1/2) * v ⊗ hε
-        pass
-
     def log(self, implicit_dual_quaternion_batch):
         h = self.extract_h(implicit_dual_quaternion_batch)
-        v = implicit_dual_quaternion_batch[:, 4:]
+        v = self.extract_v(implicit_dual_quaternion_batch)
         hv = self.extract_hv(h)
         s = torch.norm(hv, p=2, dim=1, keepdim=True)
         c = self.extract_hw(h)
@@ -163,7 +153,7 @@ class ImplicitDualQuaternion(SE3):
         omega = hv * (theta / s)
         omega[omega != omega] = 0.0
         mu_r = (c * theta) / s
-        mu_r_singularity = s < self.epsilon
+        mu_r_singularity = s.abs() < self.epsilon
         if mu_r_singularity[mu_r_singularity == True].shape[0] > 0:
             mu_r[mu_r_singularity] = (
                 1.0
@@ -185,31 +175,47 @@ class ImplicitDualQuaternion(SE3):
         return torch.cat([log_v, omega], 1)
 
 
-coords = torch.tensor(
-    [
-        [1, 0, 0, 0, 0, 0],
-        [0, 1, 0, 0, 0, 0],
-        [0, 0, 1, 0, 0, 0],
-        [0, 0, 0, torch.pi / 4.0, 0, 0],
-        [0, 0, 0, 0, torch.pi / 4.0, 0],
-        [0, 0, 0, 0, 0, torch.pi / 4.0],
-        [1, 0, 0, torch.pi / 4.0, 0, 0],
-    ]
-).float()
-expected_exp = torch.tensor(
-    [
-        [0, 0, 0, 1, 2, 0, 0],
-        [0, 0, 0, 1, 0, 2, 0],
-        [0, 0, 0, 1, 0, 0, 2],
-        [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 0, 0, 0],
-        [0, math.sin(math.pi / 4.0), 0, math.cos(math.pi / 4.0), 0, 0, 0],
-        [0, 0, math.sin(math.pi / 4.0), math.cos(math.pi / 4.0), 0, 0, 0],
-        [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 2, 0, 0],
-    ]
-).float()
+if __name__ == "__main__":
+    coords = torch.tensor(
+        [
+            [1, 0, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0],
+            [0, 0, 0, torch.pi / 4.0, 0, 0],
+            [0, 0, 0, 0, torch.pi / 4.0, 0],
+            [0, 0, 0, 0, 0, torch.pi / 4.0],
+            [1, 0, 0, torch.pi / 4.0, 0, 0],
+        ]
+    ).float()
+    expected_exp = torch.tensor(
+        [
+            [0, 0, 0, 1, 2, 0, 0],
+            [0, 0, 0, 1, 0, 2, 0],
+            [0, 0, 0, 1, 0, 0, 2],
+            [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 0, 0, 0],
+            [0, math.sin(math.pi / 4.0), 0, math.cos(math.pi / 4.0), 0, 0, 0],
+            [0, 0, math.sin(math.pi / 4.0), math.cos(math.pi / 4.0), 0, 0, 0],
+            [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 2, 0, 0],
+        ]
+    ).float()
 
-se3 = ImplicitDualQuaternion()
-se3_idq = se3.exp(coords)
-assert (expected_exp - se3_idq).abs().mean(1).mean(0).item() < 1e-6
-se3_log = se3.log(se3_idq)
-assert (coords - se3_log).abs().mean(1).mean(0).item() < 1e-6
+    expected_exp_squared = torch.tensor(
+        [
+            [0, 0, 0, 1, 4, 0, 0],
+            [0, 0, 0, 1, 0, 4, 0],
+            [0, 0, 0, 1, 0, 0, 4],
+            [math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 0, 0, 0],
+            [0, math.sin(math.pi / 2.0), 0, math.cos(math.pi / 2.0), 0, 0, 0],
+            [0, 0, math.sin(math.pi / 2.0), math.cos(math.pi / 2.0), 0, 0, 0],
+            [math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 4, 0, 0],
+        ]
+    ).float()
+
+    se3 = ImplicitDualQuaternion()
+    se3_idq = se3.exp(coords)
+    assert (expected_exp - se3_idq).abs().mean(1).mean(0).item() < 1e-6
+    se3_log = se3.log(se3_idq)
+    assert (coords - se3_log).abs().mean(1).mean(0).item() < 1e-6
+    exp_squared = se3.chain(se3_idq, se3_idq)
+    assert (expected_exp_squared - exp_squared).abs().mean(1).mean(0).item() < 1e-6
+    print("ALL TESTS PASSED")
