@@ -1,5 +1,6 @@
 import click
 from torch.utils.tensorboard import SummaryWriter
+from linguamechanica.se3 import ProjectiveMatrix
 
 from linguamechanica.agent import IKAgent
 from linguamechanica.environment import Environment

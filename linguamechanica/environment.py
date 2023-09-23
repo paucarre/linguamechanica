@@ -71,7 +71,7 @@ class Environment:
         current_transformation = self.open_chain.forward_kinematics(
             self.current_thetas
         )
-        return transforms.se3_log_map(current_transformation.get_matrix())
+        return self.open_chain.se3.log(current_transformation)
 
     def reset_to_random_targets(self, summary=None):
         target_thetas_batch = self.uniformly_sample_parameters_within_constraints()
@@ -93,7 +93,7 @@ class Environment:
         target_transformation = self.open_chain.forward_kinematics(
             self.target_thetas
         )
-        self.target_pose = transforms.se3_log_map(target_transformation.get_matrix())
+        self.target_pose = self.open_chain.se3(target_transformation)
         noise = (
             torch.randn_like(self.target_thetas)
             * self.training_state.initial_theta_std_dev()
