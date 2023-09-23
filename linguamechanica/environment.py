@@ -1,7 +1,6 @@
 import random
 
 import torch
-from pytorch3d import transforms
 
 from linguamechanica.kinematics import DifferentiableOpenChainMechanism
 
@@ -68,9 +67,7 @@ class Environment:
         return self._reset(summary)
 
     def current_pose(self):
-        current_transformation = self.open_chain.forward_kinematics(
-            self.current_thetas
-        )
+        current_transformation = self.open_chain.forward_kinematics(self.current_thetas)
         return self.open_chain.se3.log(current_transformation)
 
     def reset_to_random_targets(self, summary=None):
@@ -90,9 +87,7 @@ class Environment:
 
     def _reset_to_target_thetas_batch(self, target_thetas_batch, summary=None):
         self.target_thetas = target_thetas_batch
-        target_transformation = self.open_chain.forward_kinematics(
-            self.target_thetas
-        )
+        target_transformation = self.open_chain.forward_kinematics(self.target_thetas)
         self.target_pose = self.open_chain.se3.log(target_transformation)
         noise = (
             torch.randn_like(self.target_thetas)

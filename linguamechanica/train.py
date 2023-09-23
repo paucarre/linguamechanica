@@ -1,11 +1,11 @@
 import click
 from torch.utils.tensorboard import SummaryWriter
-from linguamechanica.se3 import ProjectiveMatrix
 
 from linguamechanica.agent import IKAgent
 from linguamechanica.environment import Environment
 from linguamechanica.kinematics import UrdfRobotLibrary
-from linguamechanica.training_context import EpisodeState
+from linguamechanica.se3 import ImplicitDualQuaternion
+from linguamechanica.training_context import EpisodeState, TrainingState
 
 
 def evaluate_policy(open_chain, agent, training_state, summary):
@@ -49,8 +49,8 @@ def evaluate_policy(open_chain, agent, training_state, summary):
 )
 def train(checkpoint, urdf, level):
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
-    #TODO: make this generic
-    se3 = ProjectiveMatrix()
+    # TODO: make this generic
+    se3 = ImplicitDualQuaternion()
     open_chain = urdf_robot.extract_open_chains(se3, 0.3)[-1].cuda()
     summary = SummaryWriter()
     agent, training_state = None, None

@@ -3,17 +3,17 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from pytorch3d import transforms
 from pytransform3d.transformations import (
     exponential_coordinates_from_transform,
     invert_transform,
 )
-from linguamechanica.se3 import ProjectiveMatrix
 from pytransform3d.urdf import (
     UrdfTransformManager,
     initialize_urdf_transform_manager,
     parse_urdf,
 )
+
+from linguamechanica.se3 import ProjectiveMatrix
 
 
 def to_left_multiplied(right_multiplied):
@@ -101,9 +101,11 @@ class DifferentiableOpenChainMechanism:
     def compute_pose_and_error_pose(self, thetas, target_pose):
         current_transformation = self.forward_kinematics(thetas)
         target_transformation = self.se3.exp(target_pose)
-        current_trans_to_target = self.se3.chain(self.se3.invert(target_transformation), current_transformation)
+        current_trans_to_target = self.se3.chain(
+            self.se3.invert(target_transformation), current_transformation
+        )
         current_trans_to_target = current_trans_to_target.to(thetas.device)
-        error_pose =  self.se3.log(current_trans_to_target)
+        error_pose = self.se3.log(current_trans_to_target)
         pose = self.se3.log(current_transformation)
         return pose, error_pose
 
@@ -125,6 +127,7 @@ class DifferentiableOpenChainMechanism:
             if max_proportional_error.mean() > 1e-1:
                 torch.set_printoptions(precision=20)
                 print("ERROR POSE")
+                print(type(self.se3))
                 print(error_pose[idx, :].data)
                 print(max_proportional_error.data)
             summary.add_scalar(
@@ -243,15 +246,16 @@ class DifferentiableOpenChainMechanism:
         transformations = transformations.view(
             original_shape[0],
             original_shape[1],
-            transformations.shape[1],
-            transformations.shape[2],
+            *self.se3.element_shape()
         )
         chains_length = transformations.shape[1]
         num_chains = transformations.shape[0]
         computed_transforms = self.se3.identity(num_chains).to(coordinates.device)
         for chain_idx in range(chains_length):
-            current_transformations = transformations[:, chain_idx, :, :]            
-            computed_transforms = self.se3.chain(computed_transforms, current_transformations)
+            current_transformations = transformations[:, chain_idx, :]
+            computed_transforms = self.se3.chain(
+                computed_transforms, current_transformations
+            )
         initial_element = self.se3.repeat(self.initial_element, num_chains)
         forward_matrix = self.se3.chain(computed_transforms, initial_element)
         return forward_matrix
@@ -293,6 +297,7 @@ class UrdfRobot:
         return transform
 
     def extract_open_chains(self, se3, epsillon):
+        se3_projective = ProjectiveMatrix()
         open_chains = []
         screws = []
         transform_zero = np.eye(4)
@@ -320,9 +325,11 @@ class UrdfRobot:
                 np.expand_dims(np.concatenate([screw[3:], screw[:3]]), axis=0)
             )
             screw_torch = torch.Tensor(np.concatenate(screws.copy()))
-            initial_twist = se3.log(to_left_multiplied(torch.Tensor(transform_zero).unsqueeze(0)))
+            initial_twist = se3_projective.log(
+                to_left_multiplied(torch.Tensor(transform_zero).unsqueeze(0))
+            )
             open_chain = DifferentiableOpenChainMechanism(
-                screw_torch, initial_twist, self.joint_limits[: i + 1]
+                screw_torch, initial_twist, self.joint_limits[: i + 1], se3
             )
             open_chains.append(open_chain)
         return open_chains
@@ -377,6 +384,6 @@ class UrdfRobotLibrary:
 
 if __name__ == "__main__":
     urdf_robot = UrdfRobotLibrary.dobot_cr5()
-    #TODO: make this generic
+    # TODO: make this generic
     se3 = ProjectiveMatrix()
     open_chains = urdf_robot.extract_open_chains(se3, 0.1)

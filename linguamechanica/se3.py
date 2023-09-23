@@ -1,10 +1,10 @@
 import math
-from pytorch3d import transforms
+
 import torch
+from pytorch3d import transforms
 
 
-class SE3():
-
+class SE3:
     def exp(self, twist: torch.Tensor) -> torch.Tensor:
         self.raise_not_implemented_error("exp")
 
@@ -37,8 +37,8 @@ class SE3():
             f"'{name}' not implemented in SE3 class. Use its subclasses: {subclasses}"
         )
 
-class ProjectiveMatrix(SE3):
 
+class ProjectiveMatrix(SE3):
     def exp(self, twist: torch.Tensor) -> torch.Tensor:
         return transforms.se3_exp_map(twist)
 
@@ -48,19 +48,22 @@ class ProjectiveMatrix(SE3):
     def chain(
         self, left_batched: torch.Tensor, right_batched: torch.Tensor
     ) -> torch.Tensor:
-        return transforms.Transform3d(matrix=right_batched).compose(
-            transforms.Transform3d(matrix=left_batched)
-        ).get_matrix()
+        return (
+            transforms.Transform3d(matrix=right_batched)
+            .compose(transforms.Transform3d(matrix=left_batched))
+            .get_matrix()
+        )
 
     def invert(self, matrix: torch.Tensor) -> torch.Tensor:
         return transforms.Transform3d(matrix=matrix).inverse().get_matrix()
 
     def identity(self, batch_size: int) -> torch.Tensor:
         return transforms.Transform3d(
-            matrix=torch.eye(4)
-            .unsqueeze(0)
-            .repeat(batch_size, 1, 1)
+            matrix=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1)
         ).get_matrix()
+
+    def element_shape(self):
+        return [4, 4]
 
     def repeat(self, element: torch.Tensor, batch_size: int) -> torch.Tensor:
         if len(element.shape) == 2:
@@ -69,11 +72,11 @@ class ProjectiveMatrix(SE3):
             return element.repeat(batch_size, 1, 1)
 
     def act_vector(self, idq: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
-        #self.raise_not_implemented_error("act_vector")
+        # self.raise_not_implemented_error("act_vector")
         pass
 
     def act_point(self, idq: torch.Tensor, point: torch.Tensor) -> torch.Tensor:
-        #self.raise_not_implemented_error("act_point")
+        # self.raise_not_implemented_error("act_point")
         pass
 
 
@@ -114,14 +117,27 @@ class ImplicitDualQuaternion(SE3):
         h = self.quat_mul(lh, rh)
         lv = self.extract_v(left_idq)
         rv = self.extract_v(right_idq)
-        v = self.quat_mul(
+        velocity_rotated = self.quat_mul(
             lh, self.quat_mul(self.vect_to_quat(rv), self.quat_conj(lh))
-        ) + self.vect_to_quat(lv)
+        )
+        v = velocity_rotated + self.vect_to_quat(lv)
         # TODO: maybe normalize `h` just in case it numerically degrades?
         return torch.cat([h, v[:, :3]], 1)
 
-    def invert(idq):
-        return self.quat_conj(idq)
+    def invert(self, idq):
+        # TODO: test this
+        h_inv = self.quat_conj(self.extract_h(idq))
+        v = self.extract_v(idq)
+        v_inv = -self.quat_mul(
+            h_inv, self.quat_mul(self.vect_to_quat(v), self.quat_conj(h_inv))
+        )
+        return torch.cat([h_inv, v_inv[:, :3]], 1)
+
+    def identity(self, batch_size: int) -> torch.Tensor:
+        zero_h = torch.zeros(batch_size, 4)
+        zero_h[:, 3] = 1
+        zero_v = torch.zeros(batch_size, 3)
+        return torch.cat([zero_h, zero_v], 1)
 
     def exp(self, twist):
         coord_v = twist[:, :3]
@@ -146,8 +162,8 @@ class ImplicitDualQuaternion(SE3):
         if mu_d_singularity[mu_d_singularity == True].shape[0] > 0:
             mu_d[mu_d_singularity] = (
                 (4.0 / 3.0)
-                - ( ( 4.0 * omega_square[mu_d_singularity] ) / 15.0)
-                + ( ( 8.0 * omega_quartic[mu_d_singularity] ) / 315.0)
+                - ((4.0 * omega_square[mu_d_singularity]) / 15.0)
+                + ((8.0 * omega_quartic[mu_d_singularity]) / 315.0)
             )
         # TODO: this inner product should be computed w.o. einsum
         sigma = torch.einsum("bi,bi->b", coord_v, w).unsqueeze(1)
@@ -184,12 +200,21 @@ class ImplicitDualQuaternion(SE3):
                 + (theta_square[mu_d_singularity] / 45.0)
                 + ((2.0 * theta_fourth[mu_d_singularity]) / 945.0)
             )
-        #TODO: try to implement without `einsum`
+        # TODO: try to implement without `einsum`
         inner = torch.einsum("bi,bi->b", v / 2.0, omega).unsqueeze(1)
         log_v = (
             (mu_d * inner * omega) + (mu_r * (v / 2.0)) + torch.cross((v / 2.0), omega)
         )
         return torch.cat([log_v, omega], 1)
+
+    def element_shape(self):
+        return [4 + 3]
+
+    def repeat(self, element: torch.Tensor, batch_size: int) -> torch.Tensor:
+        if len(element.shape) == 1:
+            return element.unsqueeze(0).repeat(batch_size, 1)
+        elif len(element.shape) == 2:
+            return element.repeat(batch_size, 1)
 
     def vect_to_quat(self, vector):
         return torch.cat([vector, torch.zeros_like(vector[:, 0:1])], 1)
@@ -220,6 +245,7 @@ class ImplicitDualQuaternion(SE3):
 
     def extract_hw(self, h):
         return h[:, 3:4]
+
 
 if __name__ == "__main__":
     coords = torch.tensor(
@@ -264,4 +290,8 @@ if __name__ == "__main__":
     assert (coords - se3_log).abs().mean(1).mean(0).item() < 1e-6
     exp_squared = se3.chain(se3_idq, se3_idq)
     assert (expected_exp_squared - exp_squared).abs().mean(1).mean(0).item() < 1e-6
+    exp_squared_inv = se3.invert(exp_squared)
+    identities = se3.chain(exp_squared_inv, exp_squared)
+    expected_identities = se3.identity(identities.shape[0])
+    assert (expected_identities - identities).abs().mean(1).mean(0).item() < 1e-6
     print("ALL TESTS PASSED")

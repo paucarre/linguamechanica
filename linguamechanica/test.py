@@ -52,7 +52,7 @@ def setup_inference(
     robot_ids, urdf, checkpoint, samples, level, target_thetas, target_pose
 ):
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
-    #TODO: make this generic
+    # TODO: make this generic
     se3 = ProjectiveMatrix()
     open_chain = urdf_robot.extract_open_chains(se3, 0.3)[-1].cuda()
     agent = IKAgent.from_checkpoint(

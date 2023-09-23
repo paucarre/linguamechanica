@@ -31,7 +31,7 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
             pose = transforms.se3_log_map(transformation)
             # current_transformation = open_chain.forward_kinematics(coordinates)
             torch.set_printoptions(precision=10)
-            target_transformation = transforms.se3_exp_map(pose)
+            transforms.se3_exp_map(pose)
             # transforms.se3_exp_map(transforms.se3_log_map(transform))
             error_pose = open_chain.compute_error_pose(coordinates, pose)
             expected_error_pose = torch.zeros(error_pose.shape)
@@ -292,7 +292,7 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                 [0, 0, 0, 1],
             ]
         )
-        se3=ProjectiveMatrix()
+        se3 = ProjectiveMatrix()
         initial_twist = se3.log(to_left_multiplied(initial.unsqueeze(0)))
         open_chain = DifferentiableOpenChainMechanism(
             screws, initial_twist, [(0, 100.0), (0, math.pi * 2)]
@@ -348,10 +348,7 @@ class UrdfRobot(unittest.TestCase):
             coordinates = torch.Tensor(coordinates).unsqueeze(0)
             transformations = urdf_robot.transformations(coordinates)
             for i, transformation in enumerate(transformations):
-                computed = (
-                    open_chains[i]
-                    .forward_kinematics(coordinates[:, : i + 1])
-                )
+                computed = open_chains[i].forward_kinematics(coordinates[:, : i + 1])
                 self.assertTrue(
                     np.isclose(
                         computed.squeeze(),
