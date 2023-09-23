@@ -1,34 +1,80 @@
 import math
-
+from pytorch3d import transforms
 import torch
 
 
-class SE3:
-    def raise_not_implemented_error(self, name):
-        [cls.__name__ for cls in SE3.__subclasses__()]
-        raise NotImplementedError(
-            f"'{name}' not implemented in SE3 class. Use its subclasses: {subclassess}"
-        )
+class SE3():
 
-    def exp(self, coordinates: torch.Tensor) -> torch.Tensor:
+    def exp(self, twist: torch.Tensor) -> torch.Tensor:
         self.raise_not_implemented_error("exp")
 
-    def log(self, batched_vector_space: torch.Tensor) -> torch.Tensor:
+    def log(self, element: torch.Tensor) -> torch.Tensor:
         self.raise_not_implemented_error("log")
 
     def chain(
-        self, left_batched_SE3: torch.Tensor, right_batched_SE3: torch.Tensor
+        self, left_element: torch.Tensor, right_element: torch.Tensor
     ) -> torch.Tensor:
         self.raise_not_implemented_error("chain")
 
-    def invert(self, batched_SE3: torch.Tensor) -> torch.Tensor:
+    def invert(self, element: torch.Tensor) -> torch.Tensor:
         self.raise_not_implemented_error("invert")
 
-    def act_vector(self, idq: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
+    def identity(self, batch_size: int) -> torch.Tensor:
+        self.raise_not_implemented_error("identity")
+
+    def act_vector(self, element: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
         self.raise_not_implemented_error("act_vector")
 
-    def act_point(self, idq: torch.Tensor, point: torch.Tensor) -> torch.Tensor:
+    def act_point(self, element: torch.Tensor, point: torch.Tensor) -> torch.Tensor:
         self.raise_not_implemented_error("act_point")
+
+    def repeat(self, element: torch.Tensor, batch_size) -> torch.Tensor:
+        self.raise_not_implemented_error("repeat")
+
+    def raise_not_implemented_error(self, name):
+        subclasses = [cls.__name__ for cls in SE3.__subclasses__()]
+        raise NotImplementedError(
+            f"'{name}' not implemented in SE3 class. Use its subclasses: {subclasses}"
+        )
+
+class ProjectiveMatrix(SE3):
+
+    def exp(self, twist: torch.Tensor) -> torch.Tensor:
+        return transforms.se3_exp_map(twist)
+
+    def log(self, transformation: torch.Tensor) -> torch.Tensor:
+        return transforms.se3_log_map(transformation)
+
+    def chain(
+        self, left_batched: torch.Tensor, right_batched: torch.Tensor
+    ) -> torch.Tensor:
+        return transforms.Transform3d(matrix=right_batched).compose(
+            transforms.Transform3d(matrix=left_batched)
+        ).get_matrix()
+
+    def invert(self, matrix: torch.Tensor) -> torch.Tensor:
+        return transforms.Transform3d(matrix=matrix).inverse().get_matrix()
+
+    def identity(self, batch_size: int) -> torch.Tensor:
+        return transforms.Transform3d(
+            matrix=torch.eye(4)
+            .unsqueeze(0)
+            .repeat(batch_size, 1, 1)
+        ).get_matrix()
+
+    def repeat(self, element: torch.Tensor, batch_size: int) -> torch.Tensor:
+        if len(element.shape) == 2:
+            return element.unsqueeze(0).repeat(batch_size, 1, 1)
+        elif len(element.shape) == 3:
+            return element.repeat(batch_size, 1, 1)
+
+    def act_vector(self, idq: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
+        #self.raise_not_implemented_error("act_vector")
+        pass
+
+    def act_point(self, idq: torch.Tensor, point: torch.Tensor) -> torch.Tensor:
+        #self.raise_not_implemented_error("act_point")
+        pass
 
 
 class ImplicitDualQuaternion(SE3):
@@ -59,21 +105,6 @@ class ImplicitDualQuaternion(SE3):
     def __init__(self, epsilon=1e-4):
         self.epsilon = epsilon
 
-    def quat_mul(self, lh, rh):
-        ai, bi, ci, di = 3, 0, 1, 2
-        la, lb, lc, ld = lh[:, ai], lh[:, bi], lh[:, ci], lh[:, di]
-        ra, rb, rc, rd = rh[:, ai], rh[:, bi], rh[:, ci], rh[:, di]
-        h_a = (la * ra) - (lb * rb) - (lc * rc) - (ld * rd)
-        h_b = (la * rb) + (lb * ra) + (lc * rd) - (ld * rc)
-        h_c = (la * rc) - (lb * rd) + (lc * ra) + (ld * rb)
-        h_d = (la * rd) + (lb * rc) - (lc * rb) + (ld * ra)
-        return torch.cat(
-            [h_b.unsqueeze(1), h_c.unsqueeze(1), h_d.unsqueeze(1), h_a.unsqueeze(1)], 1
-        )
-
-    def quat_conj(self, h):
-        return torch.cat([-h[:, :3], h[:, 3:4]], 1)
-
     def act_vector(self, idq, vector):
         return self.quat_mul(idq, self.vect_to_quat(vector))[:3]
 
@@ -92,24 +123,9 @@ class ImplicitDualQuaternion(SE3):
     def invert(idq):
         return self.quat_conj(idq)
 
-    def vect_to_quat(self, vector):
-        return torch.cat([vector, torch.zeros_like(vector[:, 0:1])], 1)
-
-    def extract_v(self, idq):
-        return idq[:, 4:]
-
-    def extract_h(self, idq):
-        return idq[:, :4]
-
-    def extract_hv(self, h):
-        return h[:, :3]
-
-    def extract_hw(self, h):
-        return h[:, 3:4]
-
-    def exp(self, coordinates):
-        coord_v = coordinates[:, :3]
-        w = coordinates[:, 3:]
+    def exp(self, twist):
+        coord_v = twist[:, :3]
+        w = twist[:, 3:]
         omega = torch.norm(w, p=2, dim=1, keepdim=True)
         cos = omega.cos()
         sin = omega.sin()
@@ -168,12 +184,42 @@ class ImplicitDualQuaternion(SE3):
                 + (theta_square[mu_d_singularity] / 45.0)
                 + ((2.0 * theta_fourth[mu_d_singularity]) / 945.0)
             )
+        #TODO: try to implement without `einsum`
         inner = torch.einsum("bi,bi->b", v / 2.0, omega).unsqueeze(1)
         log_v = (
             (mu_d * inner * omega) + (mu_r * (v / 2.0)) + torch.cross((v / 2.0), omega)
         )
         return torch.cat([log_v, omega], 1)
 
+    def vect_to_quat(self, vector):
+        return torch.cat([vector, torch.zeros_like(vector[:, 0:1])], 1)
+
+    def quat_mul(self, lh, rh):
+        ai, bi, ci, di = 3, 0, 1, 2
+        la, lb, lc, ld = lh[:, ai], lh[:, bi], lh[:, ci], lh[:, di]
+        ra, rb, rc, rd = rh[:, ai], rh[:, bi], rh[:, ci], rh[:, di]
+        h_a = (la * ra) - (lb * rb) - (lc * rc) - (ld * rd)
+        h_b = (la * rb) + (lb * ra) + (lc * rd) - (ld * rc)
+        h_c = (la * rc) - (lb * rd) + (lc * ra) + (ld * rb)
+        h_d = (la * rd) + (lb * rc) - (lc * rb) + (ld * ra)
+        return torch.cat(
+            [h_b.unsqueeze(1), h_c.unsqueeze(1), h_d.unsqueeze(1), h_a.unsqueeze(1)], 1
+        )
+
+    def quat_conj(self, h):
+        return torch.cat([-h[:, :3], h[:, 3:4]], 1)
+
+    def extract_v(self, idq):
+        return idq[:, 4:]
+
+    def extract_h(self, idq):
+        return idq[:, :4]
+
+    def extract_hv(self, h):
+        return h[:, :3]
+
+    def extract_hw(self, h):
+        return h[:, 3:4]
 
 if __name__ == "__main__":
     coords = torch.tensor(

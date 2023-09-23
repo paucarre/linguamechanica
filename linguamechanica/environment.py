@@ -68,7 +68,7 @@ class Environment:
         return self._reset(summary)
 
     def current_pose(self):
-        current_transformation = self.open_chain.forward_transformation(
+        current_transformation = self.open_chain.forward_kinematics(
             self.current_thetas
         )
         return transforms.se3_log_map(current_transformation.get_matrix())
@@ -90,7 +90,7 @@ class Environment:
 
     def _reset_to_target_thetas_batch(self, target_thetas_batch, summary=None):
         self.target_thetas = target_thetas_batch
-        target_transformation = self.open_chain.forward_transformation(
+        target_transformation = self.open_chain.forward_kinematics(
             self.target_thetas
         )
         self.target_pose = transforms.se3_log_map(target_transformation.get_matrix())

@@ -48,7 +48,9 @@ def evaluate_policy(open_chain, agent, training_state, summary):
 )
 def train(checkpoint, urdf, level):
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
-    open_chain = urdf_robot.extract_open_chains(0.3)[-1].cuda()
+    #TODO: make this generic
+    se3 = ProjectiveMatrix()
+    open_chain = urdf_robot.extract_open_chains(se3, 0.3)[-1].cuda()
     summary = SummaryWriter()
     agent, training_state = None, None
     if checkpoint is None:
