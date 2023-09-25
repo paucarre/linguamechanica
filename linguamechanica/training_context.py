@@ -13,11 +13,11 @@ class TrainingState:
     proportion_successful_to_increase_level: float = 0.2
     episode_batch_size: int = 1024
     max_std_dev = 0.002
-    save_freq: int = 10000
+    save_freq: int = 1000
     lr_actor: float = 1e-4
     lr_actor_geodesic_base: float = 1e-4
     gradient_clip_actor_geodesic_base: float = 1.0
-    lr_actor_entropy: float = 1e-6
+    lr_actor_entropy: float = 1e-4
     lr_critic: float = 1e-4
     gamma: float = 0.99
     policy_freq: int = 16
@@ -56,7 +56,7 @@ class TrainingState:
         return 1.0 * self.level
 
     def lr_actor_geodesic(self):
-        return self.lr_actor_geodesic_base / (100.0 * self.level)
+        return self.lr_actor_geodesic_base / (10.0 * self.level)
 
     def gradient_clip_actor_geodesic(self):
         return self.gradient_clip_actor_geodesic_base / (100.0 * self.level)

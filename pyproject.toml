@@ -43,6 +43,7 @@ click = "^8.1.7"
 #torchmetrics = "^1.1.2"
 isort = "^5.12.0"
 shapely = "^2.0.1"
+sympy = "^1.12"
 
 
 [build-system]

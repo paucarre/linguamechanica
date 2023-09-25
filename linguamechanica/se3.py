@@ -105,7 +105,7 @@ class ImplicitDualQuaternion(SE3):
     Like Dual Quaternions, `h = hv + hw`, where `hv=(x, y, z)` and `hw = w`
     """
 
-    def __init__(self, epsilon=1e-4):
+    def __init__(self, epsilon=1e-3):
         self.epsilon = epsilon
 
     def act_vector(self, idq, vector):
@@ -173,17 +173,79 @@ class ImplicitDualQuaternion(SE3):
         v = ((2.0 * mu_r) * cross) + (cos * 2.0 * mu_r * coord_v) + (mu_d * sigma * w)
         return torch.cat([h, v], 1)
 
+    # TODO: move this to a utilities method
+    def atan2(self, y, x, epsilon=1e-3):
+        """
+        This function computes `atan2` keeping safe gradients
+        Example of problem with pytorch and small denominator with Nan Gradients:
+            https://discuss.pytorch.org/t/how-to-avoid-nan-output-from-atan2-during-backward-pass/176890
+        For implementation details see https://en.wikipedia.org/wiki/Atan2
+        """
+        result = torch.ones_like(y)
+        x_is_near_zero = x.abs() <= epsilon
+        x_is_positive = x > epsilon
+        x_is_negative = x < -epsilon
+        y_is_near_zero = y.abs() <= epsilon
+        y_is_positive = y >= 0.0
+        y_is_negative = y < 0.0
+        result[x_is_positive] = torch.arctan(y[x_is_positive] / x[x_is_positive])
+        result[torch.logical_and(x_is_near_zero, y_is_negative)] = -torch.pi / 2.0
+        result[torch.logical_and(x_is_near_zero, y_is_positive)] = torch.pi / 2.0
+        x_is_negative_and_y_is_negative = torch.logical_and(
+            x_is_negative, y_is_negative
+        )
+        result[x_is_negative_and_y_is_negative] = (
+            torch.arctan(
+                y[x_is_negative_and_y_is_negative] / x[x_is_negative_and_y_is_negative]
+            )
+            - torch.pi
+        )
+        x_is_negative_and_y_is_positive = torch.logical_and(
+            x_is_negative, y_is_positive
+        )
+        result[x_is_negative_and_y_is_positive] = (
+            torch.arctan(
+                y[x_is_negative_and_y_is_positive] / x[x_is_negative_and_y_is_positive]
+            )
+            + torch.pi
+        )
+        return result
+
     def log(self, implicit_dual_quaternion_batch):
+        # zero_div_eps = 1e-12
         h = self.extract_h(implicit_dual_quaternion_batch)
         v = self.extract_v(implicit_dual_quaternion_batch)
         hv = self.extract_hv(h)
         s = torch.norm(hv, p=2, dim=1, keepdim=True)
         c = self.extract_hw(h)
-        theta = torch.atan2(s, c)
+
+        # Do not forward close-to-zero denominator gradients
+        theta_singularity = c.abs().squeeze() < self.epsilon
+        theta = torch.zeros_like(c)
+        if (~theta_singularity).sum() > 0:
+            theta[~theta_singularity, :] = torch.atan2(
+                s[~theta_singularity, :], c[~theta_singularity, :]
+            )
+        if theta_singularity.sum() > 0:
+            theta[theta_singularity, :] = torch.atan2(
+                s[theta_singularity, :], c.data[theta_singularity, :]
+            )
+
         theta_square = theta * theta
         theta_fourth = theta_square * theta_square
-        omega = hv * (theta / s)
-        omega[omega != omega] = 0.0
+
+        # Do not forward close-to-zero denominator gradients
+        omega_singularity = s.abs().squeeze() < self.epsilon
+        omega = torch.zeros_like(hv)
+        if (~omega_singularity).sum() > 0:
+            omega[~omega_singularity, :] = theta[~omega_singularity, :] * (
+                hv[~omega_singularity, :] / s[~omega_singularity, :]
+            )
+        if omega_singularity.sum() > 0:
+            omega[omega_singularity, :] = theta[omega_singularity, :] * (
+                hv[omega_singularity, :] / s[omega_singularity, :].data
+            )
+
         mu_r = (c * theta) / s
         mu_r_singularity = s.abs() < self.epsilon
         if mu_r_singularity[mu_r_singularity == True].shape[0] > 0:

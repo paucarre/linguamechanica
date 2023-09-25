@@ -120,11 +120,9 @@ class DifferentiableOpenChainMechanism:
         error_pose_transformation_rec = self.se3.exp(error_pose)
         error_pose_rec = self.se3.log(error_pose_transformation_rec)
         if summary is not None:
-            proportional_error = (
-                (error_pose - error_pose_rec).abs() / (error_pose.abs())
-            ).mean(1)
+            proportional_error = ((error_pose - error_pose_rec).abs()).mean(1)
             max_proportional_error, idx = proportional_error.max(0)
-            if max_proportional_error.mean() > 1e-1:
+            if max_proportional_error.mean() > 1e-5:
                 torch.set_printoptions(precision=20)
                 print("ERROR POSE")
                 print(type(self.se3))
@@ -244,9 +242,7 @@ class DifferentiableOpenChainMechanism:
         ]
         """
         transformations = transformations.view(
-            original_shape[0],
-            original_shape[1],
-            *self.se3.element_shape()
+            original_shape[0], original_shape[1], *self.se3.element_shape()
         )
         chains_length = transformations.shape[1]
         num_chains = transformations.shape[0]

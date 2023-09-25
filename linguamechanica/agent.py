@@ -1,4 +1,3 @@
-import math
 import os
 from dataclasses import asdict
 
@@ -245,7 +244,7 @@ class IKAgent:
             next_thetas = current_thetas + actions
             self.actor_optimizer.zero_grad()
             critic_prediction = self.critic_q1(next_thetas, target_pose)
-            current_actor_q_loss_running_mean = self.actor_q_loss_running_mean.compute()
+            # current_actor_q_loss_running_mean = self.actor_q_loss_running_mean.compute()
             actor_q_learning_loss = -critic_prediction.mean()
             if self.summary is not None:
                 self.summary.add_scalar(
@@ -253,46 +252,42 @@ class IKAgent:
                     actor_q_learning_loss,
                     self.training_state.t,
                 )
-            actor_q_learning_loss_derivative_error = (
-                current_actor_q_loss_running_mean - actor_q_learning_loss
-            ).abs() / (current_actor_q_loss_running_mean.abs() + 1e-6)
-            if self.summary is not None:
-                self.summary.add_scalar(
-                    "Train / Actor Q Learning Derivative Error",
-                    actor_q_learning_loss_derivative_error,
-                    self.training_state.t,
-                )
-            actor_q_learning_derivative_correction = 1.0 / max(
-                1.0, 100.0 * actor_q_learning_loss_derivative_error
-            )
-            if self.summary is not None:
-                self.summary.add_scalar(
-                    "Train / Actor Q Learning Derivative Correction",
-                    actor_q_learning_derivative_correction,
-                    self.training_state.t,
-                )
-            self.actor_q_loss_running_mean(actor_q_learning_loss)
+            # actor_q_learning_loss_derivative_error = (
+            #    current_actor_q_loss_running_mean - actor_q_learning_loss
+            # ).abs() / (current_actor_q_loss_running_mean.abs() + 1e-6)
+            # if self.summary is not None:
+            #    self.summary.add_scalar(
+            #        "Train / Actor Q Learning Derivative Error",
+            #        actor_q_learning_loss_derivative_error,
+            #        self.training_state.t,
+            #    )
+            # actor_q_learning_derivative_correction = 1.0 / max(
+            #    1.0, 100.0 * actor_q_learning_loss_derivative_error
+            # )
+            # if self.summary is not None:
+            #    self.summary.add_scalar(
+            #        "Train / Actor Q Learning Derivative Correction",
+            #        actor_q_learning_derivative_correction,
+            #        self.training_state.t,
+            #    )
+            # self.actor_q_loss_running_mean(actor_q_learning_loss)
             # Only use derivative loss regulation if there is a down-regulation (dampening)
-            if (
-                not math.isnan(actor_q_learning_derivative_correction)
-                and actor_q_learning_derivative_correction < 1.0
-            ):
-                actor_q_learning_loss = (
-                    actor_q_learning_loss * actor_q_learning_derivative_correction
-                )
-            if self.summary is not None:
-                self.summary.add_scalar(
-                    "Train / Actor Q Learning Loss Corrected",
-                    actor_q_learning_loss,
-                    self.training_state.t,
-                )
+            # if (
+            #    not math.isnan(actor_q_learning_derivative_correction)
+            #    and actor_q_learning_derivative_correction < 1.0
+            # ):
+            # actor_q_learning_loss = (
+            #    actor_q_learning_loss #* actor_q_learning_derivative_correction
+            # )
+            # if self.summary is not None:
+            #   self.summary.add_scalar(
+            #        "Train / Actor Q Learning Loss Corrected",
+            #        actor_q_learning_loss,
+            #        self.training_state.t,
+            #    )
             actor_q_learning_loss.backward()
             torch.nn.utils.clip_grad_norm_(
-                self.actor.parameters(),
-                min(
-                    self.training_state.delayed_actor_grad_clip(),
-                    actor_q_learning_derivative_correction,
-                ),
+                self.actor.parameters(), self.training_state.delayed_actor_grad_clip()
             )
             self.actor_optimizer.step()
 

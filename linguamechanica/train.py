@@ -1,4 +1,5 @@
 import click
+import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from linguamechanica.agent import IKAgent
@@ -48,6 +49,7 @@ def evaluate_policy(open_chain, agent, training_state, summary):
     required=False,
 )
 def train(checkpoint, urdf, level):
+    torch.autograd.set_detect_anomaly(True)
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
     # TODO: make this generic
     se3 = ImplicitDualQuaternion()
