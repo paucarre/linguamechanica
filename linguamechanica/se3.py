@@ -173,44 +173,6 @@ class ImplicitDualQuaternion(SE3):
         v = ((2.0 * mu_r) * cross) + (cos * 2.0 * mu_r * coord_v) + (mu_d * sigma * w)
         return torch.cat([h, v], 1)
 
-    # TODO: move this to a utilities method
-    def atan2(self, y, x, epsilon=1e-3):
-        """
-        This function computes `atan2` keeping safe gradients
-        Example of problem with pytorch and small denominator with Nan Gradients:
-            https://discuss.pytorch.org/t/how-to-avoid-nan-output-from-atan2-during-backward-pass/176890
-        For implementation details see https://en.wikipedia.org/wiki/Atan2
-        """
-        result = torch.ones_like(y)
-        x_is_near_zero = x.abs() <= epsilon
-        x_is_positive = x > epsilon
-        x_is_negative = x < -epsilon
-        y_is_near_zero = y.abs() <= epsilon
-        y_is_positive = y >= 0.0
-        y_is_negative = y < 0.0
-        result[x_is_positive] = torch.arctan(y[x_is_positive] / x[x_is_positive])
-        result[torch.logical_and(x_is_near_zero, y_is_negative)] = -torch.pi / 2.0
-        result[torch.logical_and(x_is_near_zero, y_is_positive)] = torch.pi / 2.0
-        x_is_negative_and_y_is_negative = torch.logical_and(
-            x_is_negative, y_is_negative
-        )
-        result[x_is_negative_and_y_is_negative] = (
-            torch.arctan(
-                y[x_is_negative_and_y_is_negative] / x[x_is_negative_and_y_is_negative]
-            )
-            - torch.pi
-        )
-        x_is_negative_and_y_is_positive = torch.logical_and(
-            x_is_negative, y_is_positive
-        )
-        result[x_is_negative_and_y_is_positive] = (
-            torch.arctan(
-                y[x_is_negative_and_y_is_positive] / x[x_is_negative_and_y_is_positive]
-            )
-            + torch.pi
-        )
-        return result
-
     def log(self, implicit_dual_quaternion_batch):
         # zero_div_eps = 1e-12
         h = self.extract_h(implicit_dual_quaternion_batch)
