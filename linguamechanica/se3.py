@@ -105,7 +105,7 @@ class ImplicitDualQuaternion(SE3):
     Like Dual Quaternions, `h = hv + hw`, where `hv=(x, y, z)` and `hw = w`
     """
 
-    def __init__(self, epsilon=1e-3):
+    def __init__(self, epsilon=1e-1):
         self.epsilon = epsilon
 
     def act_vector(self, idq, vector):
@@ -145,26 +145,29 @@ class ImplicitDualQuaternion(SE3):
         omega = torch.norm(w, p=2, dim=1, keepdim=True)
         cos = omega.cos()
         sin = omega.sin()
-        mu_r = sin / omega
         # TODO: it might be possible to only compute a subset of `omega_square`
         # and `omega_quartic`
         omega_square = omega * omega
         omega_quartic = omega_square * omega_square
+
+        mu_r = torch.zeros_like(omega)
         mu_r_singularity = omega.abs() < self.epsilon
-        if mu_r_singularity[mu_r_singularity == True].shape[0] > 0:
-            mu_r[mu_r_singularity] = (
-                1.0
-                - (omega_square[mu_r_singularity] / 6.0)
-                + (omega_quartic[mu_r_singularity] / 120.0)
-            )
-        mu_d = (2.0 - (cos * 2.0 * mu_r)) / omega_square
-        mu_d_singularity = omega_square < self.epsilon
-        if mu_d_singularity[mu_d_singularity == True].shape[0] > 0:
-            mu_d[mu_d_singularity] = (
-                (4.0 / 3.0)
-                - ((4.0 * omega_square[mu_d_singularity]) / 15.0)
-                + ((8.0 * omega_quartic[mu_d_singularity]) / 315.0)
-            )
+        mu_r[~mu_r_singularity] = sin[~mu_r_singularity] / omega[~mu_r_singularity]
+        mu_r[mu_r_singularity] = (
+            1.0
+            - (omega_square[mu_r_singularity] / 6.0)
+            + (omega_quartic[mu_r_singularity] / 120.0)
+        )
+
+        mu_d = torch.zeros_like(omega)
+        mu_d_singularity = omega_square.abs() < self.epsilon
+        mu_d[~mu_d_singularity] = (2.0 - (cos[~mu_d_singularity] * 2.0 * mu_r[~mu_d_singularity])) / omega_square[~mu_d_singularity]        
+        mu_d[mu_d_singularity] = (
+            (4.0 / 3.0)
+            - ((4.0 * omega_square[mu_d_singularity]) / 15.0)
+            + ((8.0 * omega_quartic[mu_d_singularity]) / 315.0)
+        )
+
         # TODO: this inner product should be computed w.o. einsum
         sigma = torch.einsum("bi,bi->b", coord_v, w).unsqueeze(1)
         h = torch.cat([mu_r * w, cos], 1)
@@ -172,6 +175,66 @@ class ImplicitDualQuaternion(SE3):
         cross = torch.cross(hv, coord_v)
         v = ((2.0 * mu_r) * cross) + (cos * 2.0 * mu_r * coord_v) + (mu_d * sigma * w)
         return torch.cat([h, v], 1)
+
+    def grad_safe_divisor(self, data, singularity_mask):
+        sign = torch.sign(data[singularity_mask])
+        sign[sign == 0.0] = 1.0
+        return data[singularity_mask, :].data  # + (1e-8 * sign)
+
+    def atan2(self, sin, cos):
+        """
+        This function computes `atan2` keeping safe gradients assuming
+        the arguments are `sin` and `cos`.
+        Example of problem with pytorch and small denominator with Nan Gradients:
+            https://discuss.pytorch.org/t/how-to-avoid-nan-output-from-atan2-during-backward-pass/176890
+        For implementation details see https://en.wikipedia.org/wiki/Atan2
+
+        Note that this atan2 implementation only works for the log as
+        it assumes that if sin is close to 0, sin will be close to +1 or -1
+        """
+        result = torch.ones_like(sin)
+        x_is_near_zero = cos.abs() <= self.epsilon
+        x_is_positive = cos > self.epsilon
+        x_is_negative = cos < -self.epsilon
+        # y_is_near_zero = sin.abs() <= self.epsilon
+        y_is_positive = sin >= 0.0
+        y_is_negative = sin < 0.0
+        result[x_is_positive] = torch.arctan(sin[x_is_positive] / cos[x_is_positive])
+
+        # if cos is close to 0, sin will be close to +1 or -1
+        if x_is_near_zero.sum() > 0:
+            x_cube = cos[x_is_near_zero] ** 3
+            x_five = x_cube * (cos[x_is_near_zero] ** 2)
+            y_cube = sin[x_is_near_zero] ** 3
+            y_five = y_cube * (sin[x_is_near_zero] ** 2)
+            result[x_is_near_zero] = (
+                (torch.pi / 2.0)
+                - (cos[x_is_near_zero] / sin[x_is_near_zero])
+                + (x_cube / (3.0 * y_cube))
+                - (x_five / (y_five * 5.0))
+            )
+
+        x_is_negative_and_y_is_negative = torch.logical_and(
+            x_is_negative, y_is_negative
+        )
+        result[x_is_negative_and_y_is_negative] = (
+            torch.arctan(
+                sin[x_is_negative_and_y_is_negative]
+                / cos[x_is_negative_and_y_is_negative]
+            )
+            - torch.pi
+        )
+        x_is_negative_and_y_is_positive = torch.logical_and(
+            x_is_negative, y_is_positive
+        )
+        result[x_is_negative_and_y_is_positive] = (
+            torch.arctan(
+                sin[x_is_negative_and_y_is_positive]
+                / cos[x_is_negative_and_y_is_positive]
+            )
+            + torch.pi
+        )
+        return result
 
     def log(self, implicit_dual_quaternion_batch):
         # zero_div_eps = 1e-12
@@ -181,49 +244,37 @@ class ImplicitDualQuaternion(SE3):
         s = torch.norm(hv, p=2, dim=1, keepdim=True)
         c = self.extract_hw(h)
 
-        # Do not forward close-to-zero denominator gradients
-        theta_singularity = c.abs().squeeze() < self.epsilon
-        theta = torch.zeros_like(c)
-        if (~theta_singularity).sum() > 0:
-            theta[~theta_singularity, :] = torch.atan2(
-                s[~theta_singularity, :], c[~theta_singularity, :]
-            )
-        if theta_singularity.sum() > 0:
-            theta[theta_singularity, :] = torch.atan2(
-                s[theta_singularity, :], c.data[theta_singularity, :]
-            )
-
+        theta = self.atan2(s, c)
         theta_square = theta * theta
         theta_fourth = theta_square * theta_square
 
-        # Do not forward close-to-zero denominator gradients
-        omega_singularity = s.abs().squeeze() < self.epsilon
         omega = torch.zeros_like(hv)
-        if (~omega_singularity).sum() > 0:
-            omega[~omega_singularity, :] = theta[~omega_singularity, :] * (
-                hv[~omega_singularity, :] / s[~omega_singularity, :]
-            )
-        if omega_singularity.sum() > 0:
-            omega[omega_singularity, :] = theta[omega_singularity, :] * (
-                hv[omega_singularity, :] / s[omega_singularity, :].data
-            )
+        omega_singularity = s.abs().squeeze() < self.epsilon
+        omega[~omega_singularity] = theta[~omega_singularity] * (hv[~omega_singularity] / s[~omega_singularity])
+        omega[omega_singularity, :] = (
+            1.0
+            + (theta_square[omega_singularity, :] / 6.0)
+            + ((7.0 / 360.0) * theta_fourth[omega_singularity, :])
+        ) * hv[omega_singularity, :]
 
-        mu_r = (c * theta) / s
+        mu_r = torch.zeros_like(theta)
         mu_r_singularity = s.abs() < self.epsilon
-        if mu_r_singularity[mu_r_singularity == True].shape[0] > 0:
-            mu_r[mu_r_singularity] = (
-                1.0
-                - (theta_square[mu_r_singularity] / 3.0)
-                - (theta_fourth[mu_r_singularity] / 45.0)
-            )
-        mu_d = (1.0 - mu_r) / theta_square
+        mu_r[~mu_r_singularity] = (c[~mu_r_singularity] * theta[~mu_r_singularity]) / s[~mu_r_singularity]
+        mu_r[mu_r_singularity] = (
+            1.0
+            - (theta_square[mu_r_singularity] / 3.0)
+            - (theta_fourth[mu_r_singularity] / 45.0)
+        )
+
+        mu_d = torch.zeros_like(mu_r)
         mu_d_singularity = theta_square < self.epsilon
-        if mu_d_singularity[mu_d_singularity == True].shape[0] > 0:
-            mu_d[mu_d_singularity] = (
-                (1.0 / 3.0)
-                + (theta_square[mu_d_singularity] / 45.0)
-                + ((2.0 * theta_fourth[mu_d_singularity]) / 945.0)
-            )
+        mu_d[~mu_d_singularity] = (1.0 - mu_r[~mu_d_singularity]) / theta_square[~mu_d_singularity]
+        mu_d[mu_d_singularity] = (
+            (1.0 / 3.0)
+            + (theta_square[mu_d_singularity] / 45.0)
+            + ((2.0 * theta_fourth[mu_d_singularity]) / 945.0)
+        )
+
         # TODO: try to implement without `einsum`
         inner = torch.einsum("bi,bi->b", v / 2.0, omega).unsqueeze(1)
         log_v = (
@@ -272,11 +323,24 @@ class ImplicitDualQuaternion(SE3):
 
 
 if __name__ == "__main__":
+
+    urdf_robot = UrdfRobotLibrary.from_urdf_path("./urdf/cr5.urdf")
+    open_chain = urdf_robot.extract_open_chains(se3, 0.1)[-1]
+    se3 = ImplicitDualQuaternion()
+    target_pose = torch.tensor([[ 0.31304278969764709473, -0.00631798803806304932,
+        1.22056627273559570312, -1.25425827503204345703,
+        0.11632148176431655884,  0.80687266588211059570]], device='cuda:0')
+    thetas = torch.tensor([[-3.51662302017211914062,  0.27089971303939819336,
+        3.34850096702575683594, -2.87017297744750976562,
+        0.16795067489147186279,  0.00000000000000000000]], device='cuda:0')
+    current_pose = open_chain.forward_kinematics(thetas)
+    '''
     coords = torch.tensor(
         [
             [1, 0, 0, 0, 0, 0],
             [0, 1, 0, 0, 0, 0],
             [0, 0, 1, 0, 0, 0],
+            [0, 0, 0, torch.pi / 2.0, 0, 0],
             [0, 0, 0, torch.pi / 4.0, 0, 0],
             [0, 0, 0, 0, torch.pi / 4.0, 0],
             [0, 0, 0, 0, 0, torch.pi / 4.0],
@@ -288,11 +352,13 @@ if __name__ == "__main__":
             [0, 0, 0, 1, 2, 0, 0],
             [0, 0, 0, 1, 0, 2, 0],
             [0, 0, 0, 1, 0, 0, 2],
+            [math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 0, 0, 0],
             [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 0, 0, 0],
             [0, math.sin(math.pi / 4.0), 0, math.cos(math.pi / 4.0), 0, 0, 0],
             [0, 0, math.sin(math.pi / 4.0), math.cos(math.pi / 4.0), 0, 0, 0],
             [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 2, 0, 0],
-        ]
+        ],
+        requires_grad=True,
     ).float()
 
     expected_exp_squared = torch.tensor(
@@ -300,6 +366,7 @@ if __name__ == "__main__":
             [0, 0, 0, 1, 4, 0, 0],
             [0, 0, 0, 1, 0, 4, 0],
             [0, 0, 0, 1, 0, 0, 4],
+            [math.sin(math.pi), 0, 0, math.cos(math.pi), 0, 0, 0],
             [math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 0, 0, 0],
             [0, math.sin(math.pi / 2.0), 0, math.cos(math.pi / 2.0), 0, 0, 0],
             [0, 0, math.sin(math.pi / 2.0), math.cos(math.pi / 2.0), 0, 0, 0],
@@ -318,4 +385,19 @@ if __name__ == "__main__":
     identities = se3.chain(exp_squared_inv, exp_squared)
     expected_identities = se3.identity(identities.shape[0])
     assert (expected_identities - identities).abs().mean(1).mean(0).item() < 1e-6
+
+    test = torch.tensor(
+        [[math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 0, 0, 0]],
+        requires_grad=True,
+    ).float()
+
+    zero_h = test  # expected_exp[0:1, :]
+    se3_log = se3.log(zero_h)
+    loss = se3_log.sum()
+    loss.retain_grad()
+    se3_log.retain_grad()
+    loss.backward()
+    print(se3_log.grad)
+    # breakpoint()
     print("ALL TESTS PASSED")
+    '''

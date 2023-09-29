@@ -9,13 +9,13 @@ from linguamechanica.kinematics import (
 import random
 import torch
 from pytorch3d import transforms
-from linguamechanica.se3 import ProjectiveMatrix
+from linguamechanica.se3 import ProjectiveMatrix, ImplicitDualQuaternion
 
 
 class TestDifferentiableOpenChainMechanism(unittest.TestCase):
     def test_compute_error_pose_cr5(self):
         urdf_robot = UrdfRobotLibrary.dobot_cr5()
-        se3 = ProjectiveMatrix()
+        se3 = ImplicitDualQuaternion()
         open_chains = urdf_robot.extract_open_chains(se3, 0.3)
         open_chain = open_chains[-1]
         for _ in range(1000):
@@ -28,11 +28,7 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                 )
             coordinates = torch.Tensor(coordinates).unsqueeze(0)
             transformation = open_chain.forward_kinematics(coordinates)
-            pose = transforms.se3_log_map(transformation)
-            # current_transformation = open_chain.forward_kinematics(coordinates)
-            torch.set_printoptions(precision=10)
-            transforms.se3_exp_map(pose)
-            # transforms.se3_exp_map(transforms.se3_log_map(transform))
+            pose = se3.log(transformation)
             error_pose = open_chain.compute_error_pose(coordinates, pose)
             expected_error_pose = torch.zeros(error_pose.shape)
             assert (error_pose - expected_error_pose).abs().sum() <= 1e-3

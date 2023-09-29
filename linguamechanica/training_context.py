@@ -14,11 +14,11 @@ class TrainingState:
     episode_batch_size: int = 1024
     max_std_dev = 0.002
     save_freq: int = 1000
-    lr_actor: float = 1e-4
+    lr_actor: float = 1e-6
     lr_actor_geodesic_base: float = 1e-4
     gradient_clip_actor_geodesic_base: float = 1.0
     lr_actor_entropy: float = 1e-4
-    lr_critic: float = 1e-4
+    lr_critic: float = 1e-6
     gamma: float = 0.99
     policy_freq: int = 16
     target_update_freq_cte: int = 16
@@ -102,7 +102,7 @@ class EpisodeState:
         self.initial_reward = initial_reward.detach().cpu()
         self.discounted_gamma = gamma
 
-    def step(self, reward, done, step, summary):
+    def step(self, reward, done, time_step, summary):
         self.done = done.detach().cpu()
         if self.discounted_reward is None:
             self.discounted_reward = reward.detach().cpu()
@@ -124,14 +124,18 @@ class EpisodeState:
               =>  0  : No improvement, final reward is equal to initial reward
               => -1  : 100% improvement, final reward is zero
             """
+            if torch.isnan(reward_times_worse).sum() > 0:
+                print("REWARD TIMES WORSE")
+                print(f"Time Step {time_step}")
+                print(torch.isnan(reward_times_worse).sum())
             summary.add_scalar(
                 f"{self.label} / Reward Times Worse",
                 reward_times_worse,
-                step,
+                time_step,
             )
             summary.add_scalar(
                 f"{self.label} / Acc. Disc. Reward",
                 self.discounted_reward.mean(),
-                step,
+                time_step,
             )
         return everything_is_done
