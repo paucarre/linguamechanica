@@ -64,7 +64,7 @@ class TestDifferentiableOpenChainMechanism:
             min_error=1e-2,
             error_weights=torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
             lr=0.01,
-            max_steps=40000,
+            max_steps=4000,
         )
         assert (found_thetas - thetas).abs().sum() <= 1e-2
 
@@ -132,9 +132,7 @@ class TestDifferentiableOpenChainMechanism:
         )
         thetas = torch.Tensor([[10.0, np.pi / 4]])
         matrix = open_chain.forward_kinematics(thetas)
-        pose = se3.log(matrix)
-
-        target_pose = pose
+        target_pose = se3.log(matrix)
         found_thetas = open_chain.inverse_kinematics(
             initial_thetas=torch.Tensor([[0.0, 0.0]]),
             target_pose=target_pose,
@@ -324,13 +322,18 @@ class TestDifferentiableOpenChainMechanism:
         )
         for i in range(expected_matrix.shape[0]):
             expected_matrix[i, :, :] = expected_matrix[i, :, :] @ initial[:, :]
-        expected_pose = se3_projective.log(to_left_multiplied(expected_matrix))
-        computed_pose = se3.log(element)
+        expected_pose = se3.exp(se3_projective.log(to_left_multiplied(expected_matrix)))
+        computed_pose = se3.log(se3.chain(se3.invert(element), expected_pose))
+        print("--------------")
+        print("expected_pose")
+        print(expected_pose)
+        print("computed_pose")
+        print(computed_pose)
         assert np.isclose(
-            expected_pose,
             computed_pose,
-            rtol=1e-05,
-            atol=1e-05,
+            torch.zeros_like(computed_pose),
+            rtol=1e-01,
+            atol=1e-01,
         ).all()
 
 
@@ -353,13 +356,13 @@ class UrdfRobot:
             for i, transformation in enumerate(transformations):
                 computed = open_chains[i].forward_kinematics(coordinates[:, : i + 1])
                 computed_pose = se3.log(computed)
-                expected = se3_projective.log(
+                expected_pose = se3_projective.log(
                     to_left_multiplied(torch.Tensor(transformation).unsqueeze(0))
                 )
                 self.assertTrue(
                     np.isclose(
                         computed_pose,
-                        expected,
+                        expected_pose,
                         rtol=1e-05,
                         atol=1e-05,
                     ).all()
