@@ -105,7 +105,7 @@ class ImplicitDualQuaternion(SE3):
     Like Dual Quaternions, `h = hv + hw`, where `hv=(x, y, z)` and `hw = w`
     """
 
-    def __init__(self, epsilon=1e-1):
+    def __init__(self, epsilon=1e-4):
         self.epsilon = epsilon
 
     def act_vector(self, idq, vector):
@@ -161,7 +161,9 @@ class ImplicitDualQuaternion(SE3):
 
         mu_d = torch.zeros_like(omega)
         mu_d_singularity = omega_square.abs() < self.epsilon
-        mu_d[~mu_d_singularity] = (2.0 - (cos[~mu_d_singularity] * 2.0 * mu_r[~mu_d_singularity])) / omega_square[~mu_d_singularity]        
+        mu_d[~mu_d_singularity] = (
+            2.0 - (cos[~mu_d_singularity] * 2.0 * mu_r[~mu_d_singularity])
+        ) / omega_square[~mu_d_singularity]
         mu_d[mu_d_singularity] = (
             (4.0 / 3.0)
             - ((4.0 * omega_square[mu_d_singularity]) / 15.0)
@@ -175,11 +177,6 @@ class ImplicitDualQuaternion(SE3):
         cross = torch.cross(hv, coord_v)
         v = ((2.0 * mu_r) * cross) + (cos * 2.0 * mu_r * coord_v) + (mu_d * sigma * w)
         return torch.cat([h, v], 1)
-
-    def grad_safe_divisor(self, data, singularity_mask):
-        sign = torch.sign(data[singularity_mask])
-        sign[sign == 0.0] = 1.0
-        return data[singularity_mask, :].data  # + (1e-8 * sign)
 
     def atan2(self, sin, cos):
         """
@@ -250,7 +247,9 @@ class ImplicitDualQuaternion(SE3):
 
         omega = torch.zeros_like(hv)
         omega_singularity = s.abs().squeeze() < self.epsilon
-        omega[~omega_singularity] = theta[~omega_singularity] * (hv[~omega_singularity] / s[~omega_singularity])
+        omega[~omega_singularity] = theta[~omega_singularity] * (
+            hv[~omega_singularity] / s[~omega_singularity]
+        )
         omega[omega_singularity, :] = (
             1.0
             + (theta_square[omega_singularity, :] / 6.0)
@@ -259,7 +258,9 @@ class ImplicitDualQuaternion(SE3):
 
         mu_r = torch.zeros_like(theta)
         mu_r_singularity = s.abs() < self.epsilon
-        mu_r[~mu_r_singularity] = (c[~mu_r_singularity] * theta[~mu_r_singularity]) / s[~mu_r_singularity]
+        mu_r[~mu_r_singularity] = (c[~mu_r_singularity] * theta[~mu_r_singularity]) / s[
+            ~mu_r_singularity
+        ]
         mu_r[mu_r_singularity] = (
             1.0
             - (theta_square[mu_r_singularity] / 3.0)
@@ -268,7 +269,9 @@ class ImplicitDualQuaternion(SE3):
 
         mu_d = torch.zeros_like(mu_r)
         mu_d_singularity = theta_square < self.epsilon
-        mu_d[~mu_d_singularity] = (1.0 - mu_r[~mu_d_singularity]) / theta_square[~mu_d_singularity]
+        mu_d[~mu_d_singularity] = (1.0 - mu_r[~mu_d_singularity]) / theta_square[
+            ~mu_d_singularity
+        ]
         mu_d[mu_d_singularity] = (
             (1.0 / 3.0)
             + (theta_square[mu_d_singularity] / 45.0)
@@ -323,18 +326,6 @@ class ImplicitDualQuaternion(SE3):
 
 
 if __name__ == "__main__":
-
-    urdf_robot = UrdfRobotLibrary.from_urdf_path("./urdf/cr5.urdf")
-    open_chain = urdf_robot.extract_open_chains(se3, 0.1)[-1]
-    se3 = ImplicitDualQuaternion()
-    target_pose = torch.tensor([[ 0.31304278969764709473, -0.00631798803806304932,
-        1.22056627273559570312, -1.25425827503204345703,
-        0.11632148176431655884,  0.80687266588211059570]], device='cuda:0')
-    thetas = torch.tensor([[-3.51662302017211914062,  0.27089971303939819336,
-        3.34850096702575683594, -2.87017297744750976562,
-        0.16795067489147186279,  0.00000000000000000000]], device='cuda:0')
-    current_pose = open_chain.forward_kinematics(thetas)
-    '''
     coords = torch.tensor(
         [
             [1, 0, 0, 0, 0, 0],
@@ -400,4 +391,3 @@ if __name__ == "__main__":
     print(se3_log.grad)
     # breakpoint()
     print("ALL TESTS PASSED")
-    '''

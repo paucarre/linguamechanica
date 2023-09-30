@@ -337,14 +337,13 @@ class IKAgent:
         return torch.logical_or(torch.isinf(tensor), torch.isnan(tensor))
 
     def corrupted_rows(self, tensor):
-        corr = self.is_corrupted(tensor).sum(1) > 0        
+        corr = self.is_corrupted(tensor).sum(1) > 0
         return tensor[corr, :]
-
 
     def actor_geodesic_optimization(self, state):
         thetas, target_pose = Environment.thetas_target_pose_from_state(state)
-        thetas.requires_grad=True
-        target_pose.requires_grad=True
+        thetas.requires_grad = True
+        target_pose.requires_grad = True
         initial_reward = Environment.compute_reward(
             self.open_chain, thetas, target_pose, self.training_state.weights
         ).mean()
@@ -370,7 +369,7 @@ class IKAgent:
         loss = (
             (final_reward - initial_reward.data) / (initial_reward.data + 1e-3)
         ).mean()
-        #self.actor.retain_grad()
+        # self.actor.retain_grad()
         loss.retain_grad()
         if self.summary is not None:
             self.summary.add_scalar(
@@ -382,27 +381,59 @@ class IKAgent:
         thetas.retain_grad()
         target_pose.retain_grad()
         loss.backward()
-        '''
+        """
 
-        '''
-        for idx, param in enumerate(self.actor.parameters()):            
+        """
+        for idx, param in enumerate(self.actor.parameters()):
             if param.grad is not None:
-                if self.is_corrupted(param).sum() > 0 or self.is_corrupted(param.grad).sum() > 0 or self.is_corrupted(loss).sum() > 0:
+                if (
+                    self.is_corrupted(param).sum() > 0
+                    or self.is_corrupted(param.grad).sum() > 0
+                    or self.is_corrupted(loss).sum() > 0
+                ):
                     print("------------- Actor Grad -------------")
                     torch.set_printoptions(precision=20)
-                    print(self.is_corrupted(param).sum() > 0, self.is_corrupted(param.grad).sum() >0 ,  self.is_corrupted(loss).sum() > 0)
+                    print(
+                        self.is_corrupted(param).sum() > 0,
+                        self.is_corrupted(param.grad).sum() > 0,
+                        self.is_corrupted(loss).sum() > 0,
+                    )
                     print(f"Time Step {self.training_state.t}")
                     print(f"Current Gradient: {idx}")
                     print("loss", loss)
-                    print("self.corrupted_rows(thetas.grad)", self.corrupted_rows(thetas.grad))
-                    print("self.corrupted_rows(target_pose.grad)", self.corrupted_rows(target_pose.grad))                    
-                    print("param", param)
+                    print(
+                        "corrupted thetas.grad",
+                        self.corrupted_rows(thetas.grad),
+                    )
+                    rows_with_corrupted_values = (
+                        self.is_corrupted(thetas.grad).sum(-1) > 0
+                    )
+                    print("corrupted thetas", thetas[rows_with_corrupted_values, :])
+                    print(
+                        "corrupted target_pose.grad",
+                        self.corrupted_rows(target_pose.grad),
+                    )
+                    rows_with_corrupted_values = (
+                        self.is_corrupted(target_pose.grad).sum(-1) > 0
+                    )
+                    print(
+                        "corrupted target_pose",
+                        target_pose[rows_with_corrupted_values, :],
+                    )
                     print("param.grad.shape", param.grad.shape)
-                    print("param.grad", self.corrupted_rows(param.grad))
-                    print("thetas", thetas)
-                    print("target_pose", target_pose)
-                    rows_with_corrupted_values = self.is_corrupted(target_pose.grad).sum(1) > 0
-                    print("param.grad with rows_with_corrupted_values", param.grad[rows_with_corrupted_values, :])
+                    print(param.grad.shape)
+                    rows_with_corrupted_values = (
+                        self.is_corrupted(param.grad).sum(-1) > 0
+                    )
+                    print(
+                        "corrupted param.grad",
+                        param.grad[rows_with_corrupted_values, :],
+                    )
+                    rows_with_corrupted_values = self.is_corrupted(param).sum(-1) > 0
+                    print(
+                        "corrupted param",
+                        param[rows_with_corrupted_values, :],
+                    )
                     print("--------------------------------------")
         torch.nn.utils.clip_grad_norm_(
             self.actor.parameters(), self.training_state.gradient_clip_actor_geodesic()
@@ -457,39 +488,61 @@ class IKAgent:
         self.total_it += 1
         state, action, reward, next_state, done = self.sample_from_buffer()
         self.actor_geodesic_optimization(state)
-        #self.critic_update(state, reward, next_state, done)
-        #self.delayed_actor_update(state)
-        #self.actor_entropy_update(state)
+        self.critic_update(state, reward, next_state, done)
+        self.delayed_actor_update(state)
+        self.actor_entropy_update(state)
         self.update_target_models()
 
 
 if __name__ == "__main__":
     from linguamechanica.kinematics import UrdfRobotLibrary
     from linguamechanica.se3 import ImplicitDualQuaternion
+
     urdf_robot = UrdfRobotLibrary.dobot_cr5()
-    se3 = ImplicitDualQuaternion()    
+    se3 = ImplicitDualQuaternion()
     open_chain = urdf_robot.extract_open_chains(se3, 0.1)[-1].cuda()
-    target_pose = torch.tensor([[ 0.31304278969764709473, -0.00631798803806304932,
-        1.22056627273559570312, -1.25425827503204345703,
-        0.11632148176431655884,  0.80687266588211059570]], device='cuda:0',
-        requires_grad=True)
-    thetas = torch.tensor([[-3.51662302017211914062,  0.27089971303939819336,
-        3.34850096702575683594, -2.87017297744750976562,
-        0.16795067489147186279,  0.00000000000000000000000000001]], device='cuda:0',
-        requires_grad=True)
+    target_pose = torch.tensor(
+        [
+            [
+                0.31304278969764709473,
+                -0.00631798803806304932,
+                1.22056627273559570312,
+                -1.25425827503204345703,
+                0.11632148176431655884,
+                0.80687266588211059570,
+            ]
+        ],
+        device="cuda:0",
+        requires_grad=True,
+    )
+    thetas = torch.tensor(
+        [
+            [
+                -3.51662302017211914062,
+                0.27089971303939819336,
+                3.34850096702575683594,
+                -2.87017297744750976562,
+                0.16795067489147186279,
+                0.00000000000000000000000000001,
+            ]
+        ],
+        device="cuda:0",
+        requires_grad=True,
+    )
     thetas.retain_grad()
     target_pose.retain_grad()
-    #current_pose = 
+    # current_pose =
     loss = Environment.compute_reward(
-            open_chain, thetas, target_pose, torch.ones(6).cuda()).mean()
+        open_chain, thetas, target_pose, torch.ones(6).cuda()
+    ).mean()
     print(loss)
-    #loss = se3.exp(target_pose).mean()
+    # loss = se3.exp(target_pose).mean()
     print(target_pose.grad)
-    #open_chain = urdf_robot.extract_open_chains(se3, 0.1)[-2].cuda()
-    #loss = open_chain.forward_kinematics(thetas[:, :5]).mean()
-    #loss.backward()
-    #print(thetas.grad)
-    #open_chain = urdf_robot.extract_open_chains(se3, 0.1)[-1].cuda()
-    #loss = open_chain.forward_kinematics(thetas[:, :]).mean()
-    #loss.backward()
-    #print(thetas.grad)
+    # open_chain = urdf_robot.extract_open_chains(se3, 0.1)[-2].cuda()
+    # loss = open_chain.forward_kinematics(thetas[:, :5]).mean()
+    # loss.backward()
+    # print(thetas.grad)
+    # open_chain = urdf_robot.extract_open_chains(se3, 0.1)[-1].cuda()
+    # loss = open_chain.forward_kinematics(thetas[:, :]).mean()
+    # loss.backward()
+    # print(thetas.grad)

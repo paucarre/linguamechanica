@@ -1,4 +1,3 @@
-import unittest
 import math
 import numpy as np
 from linguamechanica.kinematics import (
@@ -8,14 +7,20 @@ from linguamechanica.kinematics import (
 )
 import random
 import torch
-from pytorch3d import transforms
 from linguamechanica.se3 import ProjectiveMatrix, ImplicitDualQuaternion
 
+import pytest
 
-class TestDifferentiableOpenChainMechanism(unittest.TestCase):
-    def test_compute_error_pose_cr5(self):
+se3_representations = [
+    ProjectiveMatrix(),
+    ImplicitDualQuaternion(),
+]
+
+
+class TestDifferentiableOpenChainMechanism:
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_compute_error_pose_cr5(self, se3):
         urdf_robot = UrdfRobotLibrary.dobot_cr5()
-        se3 = ImplicitDualQuaternion()
         open_chains = urdf_robot.extract_open_chains(se3, 0.3)
         open_chain = open_chains[-1]
         for _ in range(1000):
@@ -33,7 +38,8 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
             expected_error_pose = torch.zeros(error_pose.shape)
             assert (error_pose - expected_error_pose).abs().sum() <= 1e-3
 
-    def test_inverse_kinematics_network(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_inverse_kinematics_network(self, se3):
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
@@ -43,15 +49,14 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                 [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]],
             ]
         )
-        initial = torch.eye(4)
-        se3 = ProjectiveMatrix()
-        initial_twist = se3.log(to_left_multiplied(initial.unsqueeze(0)))
+        initial = se3.identity(1)
+        initial_twist = se3.log(initial)
         open_chain = DifferentiableOpenChainMechanism(
-            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)]
+            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)], se3
         )
         thetas = torch.Tensor([[10.0, np.pi / 4]])
-        matrix = open_chain.forward_kinematics(thetas)
-        pose = transforms.se3_log_map(matrix)
+        se3_element = open_chain.forward_kinematics(thetas)
+        pose = se3.log(se3_element)
         target_pose = pose
         found_thetas = open_chain.inverse_kinematics_backprop(
             initial_thetas=torch.Tensor([[0.0, 0.0]]),
@@ -63,9 +68,9 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
         )
         assert (found_thetas - thetas).abs().sum() <= 1e-2
 
-    def test_inverse_kinematics_cr5(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_inverse_kinematics_cr5(self, se3):
         urdf_robot = UrdfRobotLibrary.dobot_cr5()
-        se3 = ProjectiveMatrix()
         open_chains = urdf_robot.extract_open_chains(se3, 0.3)
         for _ in range(3):
             coordinates = []
@@ -78,7 +83,7 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
             coordinates = torch.Tensor(coordinates).unsqueeze(0)
             open_chain = open_chains[-1]
             transformation = open_chain.forward_kinematics(coordinates)
-            pose = transforms.se3_log_map(transformation)
+            pose = se3.log(transformation)
             target_pose = pose + (torch.rand(6) * 0.001)
             initial_thetas = coordinates
             parameter_update_rate = 0.001 * torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
@@ -109,7 +114,8 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
             """
             assert relative_improvement.mean() < 1.0
 
-    def test_inverse_kinematics(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_inverse_kinematics(self, se3):
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
@@ -119,15 +125,14 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                 [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]],
             ]
         )
-        initial = torch.eye(4)
-        se3 = ProjectiveMatrix()
-        initial_twist = se3.log(to_left_multiplied(initial.unsqueeze(0)))
+        initial = se3.identity(1)
+        initial_twist = se3.log(initial)
         open_chain = DifferentiableOpenChainMechanism(
-            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)]
+            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)], se3
         )
         thetas = torch.Tensor([[10.0, np.pi / 4]])
         matrix = open_chain.forward_kinematics(thetas)
-        pose = transforms.se3_log_map(matrix)
+        pose = se3.log(matrix)
 
         target_pose = pose
         found_thetas = open_chain.inverse_kinematics(
@@ -150,7 +155,8 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
         )
         (error - torch.Tensor([0.1, 0.4, 0.5])).abs().sum() < 1e-10
 
-    def test_compute_error_pose(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_compute_error_pose(self, se3):
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
@@ -160,11 +166,10 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                 [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]],
             ]
         )
-        initial = torch.eye(4)
-        se3 = ProjectiveMatrix()
-        initial_twist = se3.log(to_left_multiplied(initial.unsqueeze(0)))
+        initial = se3.identity(1)
+        initial_twist = se3.log(initial)
         open_chain = DifferentiableOpenChainMechanism(
-            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)]
+            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)], se3
         )
         target_pose = torch.Tensor([[0, 0, 0, 0, 0, 0]])
         # test zero pose and zero thetas
@@ -184,7 +189,8 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
             error_twist - torch.Tensor([[0.0, 0.0, 0.0, np.pi / 4, 0.0, 0.0]])
         ).abs().sum() < 1e-7
 
-    def test_jacobian(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_jacobian(self, se3):
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
@@ -209,10 +215,10 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                 [0, 0, 0, 1],
             ]
         )
-        se3 = ProjectiveMatrix()
-        initial_twist = se3.log(to_left_multiplied(initial.unsqueeze(0)))
+        se3_projective = ProjectiveMatrix()
+        initial_twist = se3_projective.log(to_left_multiplied(initial.unsqueeze(0)))
         open_chain = DifferentiableOpenChainMechanism(
-            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)]
+            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)], se3
         )
         jacobian = open_chain.jacobian(thetas)
         """
@@ -260,10 +266,10 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
         assert translation_jacobian_by_translation_thetas.abs().sum() > 0.0
         jacobian_pseudoinverse = torch.linalg.pinv(jacobian)
         velocity_delta = torch.ones([3, 6, 1]) * 0.01
-        parameter_delta = torch.bmm(jacobian_pseudoinverse, velocity_delta)
-        print(parameter_delta)
+        torch.bmm(jacobian_pseudoinverse, velocity_delta)
 
-    def test_forward_kinematics(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_forward_kinematics(self, se3):
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
@@ -288,12 +294,12 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                 [0, 0, 0, 1],
             ]
         )
-        se3 = ProjectiveMatrix()
-        initial_twist = se3.log(to_left_multiplied(initial.unsqueeze(0)))
+        se3_projective = ProjectiveMatrix()
+        initial_twist = se3_projective.log(to_left_multiplied(initial.unsqueeze(0)))
         open_chain = DifferentiableOpenChainMechanism(
-            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)]
+            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)], se3
         )
-        matrix = open_chain.forward_kinematics(thetas)
+        element = open_chain.forward_kinematics(thetas)
         expected_matrix = torch.Tensor(
             [
                 [
@@ -318,20 +324,21 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
         )
         for i in range(expected_matrix.shape[0]):
             expected_matrix[i, :, :] = expected_matrix[i, :, :] @ initial[:, :]
-        self.assertTrue(
-            np.isclose(
-                to_left_multiplied(expected_matrix),
-                matrix,
-                rtol=1e-05,
-                atol=1e-05,
-            ).all()
-        )
+        expected_pose = se3_projective.log(to_left_multiplied(expected_matrix))
+        computed_pose = se3.log(element)
+        assert np.isclose(
+            expected_pose,
+            computed_pose,
+            rtol=1e-05,
+            atol=1e-05,
+        ).all()
 
 
-class UrdfRobot(unittest.TestCase):
-    def test_extract_open_chains(self):
+class UrdfRobot:
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_extract_open_chains(self, se3):
+        se3_projective = ProjectiveMatrix()
         urdf_robot = UrdfRobotLibrary.dobot_cr5()
-        se3 = ProjectiveMatrix()
         open_chains = urdf_robot.extract_open_chains(se3, 0.3)
         for _ in range(100):
             coordinates = []
@@ -345,10 +352,14 @@ class UrdfRobot(unittest.TestCase):
             transformations = urdf_robot.transformations(coordinates)
             for i, transformation in enumerate(transformations):
                 computed = open_chains[i].forward_kinematics(coordinates[:, : i + 1])
+                computed_pose = se3.log(computed)
+                expected = se3_projective.log(
+                    to_left_multiplied(torch.Tensor(transformation).unsqueeze(0))
+                )
                 self.assertTrue(
                     np.isclose(
-                        computed.squeeze(),
-                        to_left_multiplied(torch.Tensor(transformation)),
+                        computed_pose,
+                        expected,
                         rtol=1e-05,
                         atol=1e-05,
                     ).all()

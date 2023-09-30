@@ -6,7 +6,7 @@ help:
 	@echo
 
 test:
-	poetry run pytest --cov-report term --cov=linguamechanica tests
+	poetry run pytest -s --cov-report term --cov=linguamechanica tests
 
 format:
 	isort **/*.py

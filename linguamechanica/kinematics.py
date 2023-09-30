@@ -12,7 +12,9 @@ from pytransform3d.urdf import (
     initialize_urdf_transform_manager,
     parse_urdf,
 )
+
 from linguamechanica.se3 import ProjectiveMatrix
+
 
 def to_left_multiplied(right_multiplied):
     """
@@ -67,7 +69,7 @@ class KinematicsNetwork(nn.Module):
 
 
 class DifferentiableOpenChainMechanism:
-    def __init__(self, screws, initial_twist, joint_limits, se3=ProjectiveMatrix()):
+    def __init__(self, screws, initial_twist, joint_limits, se3):
         self.screws = screws
         self.se3 = se3
         self.initial_element = self.se3.exp(initial_twist)
@@ -115,7 +117,7 @@ class DifferentiableOpenChainMechanism:
         )
         current_trans_to_target = current_trans_to_target.to(thetas.device)
         error_pose = self.se3.log(current_trans_to_target)
-        '''
+        """
         error_pose_transformation_rec = self.se3.exp(error_pose)
         error_pose_rec = self.se3.log(error_pose_transformation_rec)
         if summary is not None:
@@ -132,7 +134,7 @@ class DifferentiableOpenChainMechanism:
                 max_proportional_error.mean(),
                 t,
             )
-        '''
+        """
         return error_pose
 
     def compute_weighted_error(error_pose, weights):
@@ -376,10 +378,3 @@ class UrdfRobotLibrary:
             urdf_data, mesh_path="./urdf/", package_dir="./urdf/", strict_check=True
         )
         return UrdfRobot(name, links, joints)
-
-
-if __name__ == "__main__":
-    urdf_robot = UrdfRobotLibrary.dobot_cr5()
-    # TODO: make this generic
-    se3 = ProjectiveMatrix()
-    open_chains = urdf_robot.extract_open_chains(se3, 0.1)
