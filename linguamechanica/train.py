@@ -69,6 +69,7 @@ def train(checkpoint, urdf, level):
         training_state = agent.training_state
     if level is not None:
         agent.training_state.level = level
+    # TODO: remove this
     env = Environment(open_chain=open_chain, training_state=training_state).cuda()
     state, initial_reward = env.reset_to_random_targets(summary)
     episode = EpisodeState("Train", initial_reward, training_state.gamma)

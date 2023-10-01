@@ -14,7 +14,7 @@ class TrainingState:
     episode_batch_size: int = 1024
     max_std_dev = 0.1
     save_freq: int = 1000
-    lr_actor: float = 1e-8
+    lr_actor: float = 1e-4
     lr_actor_geodesic_base: float = 1e-4
     gradient_clip_actor_geodesic_base: float = 1.0
     lr_actor_entropy: float = 1e-6

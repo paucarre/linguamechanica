@@ -177,63 +177,7 @@ class ImplicitDualQuaternion(SE3):
         v = ((2.0 * mu_r) * cross) + (cos * 2.0 * mu_r * coord_v) + (mu_d * gamma * w)
         return torch.cat([h, v], 1)
 
-    def atan2(self, sin, cos):
-        """
-        This function computes `atan2` keeping safe gradients assuming
-        the arguments are `sin` and `cos`.
-        Example of problem with pytorch and small denominator with Nan Gradients:
-            https://discuss.pytorch.org/t/how-to-avoid-nan-output-from-atan2-during-backward-pass/176890
-        For implementation details see https://en.wikipedia.org/wiki/Atan2
-
-        Note that this atan2 implementation only works for the log as
-        it assumes that if sin is close to 0, sin will be close to +1 or -1
-        """
-        result = torch.ones_like(sin)
-        x_is_near_zero = cos.abs() <= self.epsilon
-        x_is_positive = cos > self.epsilon
-        x_is_negative = cos < -self.epsilon
-        # y_is_near_zero = sin.abs() <= self.epsilon
-        y_is_positive = sin >= 0.0
-        y_is_negative = sin < 0.0
-        result[x_is_positive] = torch.arctan(sin[x_is_positive] / cos[x_is_positive])
-
-        # if cos is close to 0, sin will be close to +1 or -1
-        if x_is_near_zero.sum() > 0:
-            x_cube = cos[x_is_near_zero] ** 3
-            x_five = x_cube * (cos[x_is_near_zero] ** 2)
-            y_cube = sin[x_is_near_zero] ** 3
-            y_five = y_cube * (sin[x_is_near_zero] ** 2)
-            result[x_is_near_zero] = (
-                (torch.pi / 2.0)
-                - (cos[x_is_near_zero] / sin[x_is_near_zero])
-                + (x_cube / (3.0 * y_cube))
-                - (x_five / (y_five * 5.0))
-            )
-
-        x_is_negative_and_y_is_negative = torch.logical_and(
-            x_is_negative, y_is_negative
-        )
-        result[x_is_negative_and_y_is_negative] = (
-            torch.arctan(
-                sin[x_is_negative_and_y_is_negative]
-                / cos[x_is_negative_and_y_is_negative]
-            )
-            - torch.pi
-        )
-        x_is_negative_and_y_is_positive = torch.logical_and(
-            x_is_negative, y_is_positive
-        )
-        result[x_is_negative_and_y_is_positive] = (
-            torch.arctan(
-                sin[x_is_negative_and_y_is_positive]
-                / cos[x_is_negative_and_y_is_positive]
-            )
-            + torch.pi
-        )
-        return result
-
     def log(self, implicit_dual_quaternion_batch):
-        # zero_div_eps = 1e-12
         h = self.extract_h(implicit_dual_quaternion_batch)
         v = self.extract_v(implicit_dual_quaternion_batch)
         hv = self.extract_hv(h)
