@@ -117,7 +117,7 @@ class DifferentiableOpenChainMechanism:
         )
         current_trans_to_target = current_trans_to_target.to(thetas.device)
         error_pose = self.se3.log(current_trans_to_target)
-        """
+
         error_pose_transformation_rec = self.se3.exp(error_pose)
         error_pose_rec = self.se3.log(error_pose_transformation_rec)
         if summary is not None:
@@ -134,7 +134,7 @@ class DifferentiableOpenChainMechanism:
                 max_proportional_error.mean(),
                 t,
             )
-        """
+
         return error_pose
 
     def compute_weighted_error(error_pose, weights):

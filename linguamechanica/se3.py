@@ -322,68 +322,14 @@ class ImplicitDualQuaternion(SE3):
 
 
 if __name__ == "__main__":
-    coords = torch.tensor(
-        [
-            [1, 0, 0, 0, 0, 0],
-            [0, 1, 0, 0, 0, 0],
-            [0, 0, 1, 0, 0, 0],
-            [0, 0, 0, torch.pi / 2.0, 0, 0],
-            [0, 0, 0, torch.pi / 4.0, 0, 0],
-            [0, 0, 0, 0, torch.pi / 4.0, 0],
-            [0, 0, 0, 0, 0, torch.pi / 4.0],
-            [1, 0, 0, torch.pi / 4.0, 0, 0],
-        ]
-    ).float()
-    expected_exp = torch.tensor(
-        [
-            [0, 0, 0, 1, 2, 0, 0],
-            [0, 0, 0, 1, 0, 2, 0],
-            [0, 0, 0, 1, 0, 0, 2],
-            [math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 0, 0, 0],
-            [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 0, 0, 0],
-            [0, math.sin(math.pi / 4.0), 0, math.cos(math.pi / 4.0), 0, 0, 0],
-            [0, 0, math.sin(math.pi / 4.0), math.cos(math.pi / 4.0), 0, 0, 0],
-            [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 2, 0, 0],
-        ],
-        requires_grad=True,
-    ).float()
-
-    expected_exp_squared = torch.tensor(
-        [
-            [0, 0, 0, 1, 4, 0, 0],
-            [0, 0, 0, 1, 0, 4, 0],
-            [0, 0, 0, 1, 0, 0, 4],
-            [math.sin(math.pi), 0, 0, math.cos(math.pi), 0, 0, 0],
-            [math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 0, 0, 0],
-            [0, math.sin(math.pi / 2.0), 0, math.cos(math.pi / 2.0), 0, 0, 0],
-            [0, 0, math.sin(math.pi / 2.0), math.cos(math.pi / 2.0), 0, 0, 0],
-            [math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 4, 0, 0],
-        ]
-    ).float()
-
-    se3 = ImplicitDualQuaternion()
-    se3_idq = se3.exp(coords)
-    assert (expected_exp - se3_idq).abs().mean(1).mean(0).item() < 1e-6
-    se3_log = se3.log(se3_idq)
-    assert (coords - se3_log).abs().mean(1).mean(0).item() < 1e-6
-    exp_squared = se3.chain(se3_idq, se3_idq)
-    assert (expected_exp_squared - exp_squared).abs().mean(1).mean(0).item() < 1e-6
-    exp_squared_inv = se3.invert(exp_squared)
-    identities = se3.chain(exp_squared_inv, exp_squared)
-    expected_identities = se3.identity(identities.shape[0])
-    assert (expected_identities - identities).abs().mean(1).mean(0).item() < 1e-6
-
     test = torch.tensor(
         [[math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 0, 0, 0]],
         requires_grad=True,
     ).float()
-
-    zero_h = test  # expected_exp[0:1, :]
+    zero_h = test
     se3_log = se3.log(zero_h)
     loss = se3_log.sum()
     loss.retain_grad()
     se3_log.retain_grad()
     loss.backward()
     print(se3_log.grad)
-    # breakpoint()
-    print("ALL TESTS PASSED")

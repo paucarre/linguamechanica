@@ -73,9 +73,9 @@ def train(checkpoint, urdf, level):
     state, initial_reward = env.reset_to_random_targets(summary)
     episode = EpisodeState("Train", initial_reward, training_state.gamma)
     while not training_state.training_is_finished():
-        actions_mean, actions, _, _ = agent.choose_action(state, training_state)
+        _, actions, _, _ = agent.choose_action(state, training_state)
         actions, next_state, reward, done, level_increased = env.step(
-            actions_mean, summary=summary
+            actions, summary=summary
         )
         summary.add_scalar("Data / Step Batch Reward", reward.mean(), training_state.t)
         agent.store_transition(state, actions, reward, next_state, done)

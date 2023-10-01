@@ -12,12 +12,12 @@ class TrainingState:
     geodesic_threshold_done: float = 1e-6
     proportion_successful_to_increase_level: float = 0.2
     episode_batch_size: int = 1024
-    max_std_dev = 0.002
+    max_std_dev = 0.1
     save_freq: int = 1000
     lr_actor: float = 1e-8
     lr_actor_geodesic_base: float = 1e-4
     gradient_clip_actor_geodesic_base: float = 1.0
-    lr_actor_entropy: float = 1e-4
+    lr_actor_entropy: float = 1e-6
     lr_critic: float = 1e-6
     gamma: float = 0.99
     policy_freq: int = 16

@@ -1,3 +1,4 @@
+import math
 import os
 from dataclasses import asdict
 
@@ -244,7 +245,7 @@ class IKAgent:
             next_thetas = current_thetas + actions
             self.actor_optimizer.zero_grad()
             critic_prediction = self.critic_q1(next_thetas, target_pose)
-            # current_actor_q_loss_running_mean = self.actor_q_loss_running_mean.compute()
+            current_actor_q_loss_running_mean = self.actor_q_loss_running_mean.compute()
             actor_q_learning_loss = -critic_prediction.mean()
             if self.summary is not None:
                 self.summary.add_scalar(
@@ -252,39 +253,51 @@ class IKAgent:
                     actor_q_learning_loss,
                     self.training_state.t,
                 )
-            # actor_q_learning_loss_derivative_error = (
-            #    current_actor_q_loss_running_mean - actor_q_learning_loss
-            # ).abs() / (current_actor_q_loss_running_mean.abs() + 1e-6)
-            # if self.summary is not None:
-            #    self.summary.add_scalar(
-            #        "Train / Actor Q Learning Derivative Error",
-            #        actor_q_learning_loss_derivative_error,
-            #        self.training_state.t,
-            #    )
-            # actor_q_learning_derivative_correction = 1.0 / max(
-            #    1.0, 100.0 * actor_q_learning_loss_derivative_error
-            # )
-            # if self.summary is not None:
-            #    self.summary.add_scalar(
-            #        "Train / Actor Q Learning Derivative Correction",
-            #        actor_q_learning_derivative_correction,
-            #        self.training_state.t,
-            #    )
-            # self.actor_q_loss_running_mean(actor_q_learning_loss)
+            """
+            Explanation of the code down below:
+            The actor should not learn from the critic when 
+            the critic is not good enough at criticizing. 
+            The code below takes the approach to first extract
+            a derivate error on the critic. If the derivate error is high
+            means that the critic is learning about the actor and thus it is still not 
+            at a position to criticize the actor.
+            The Q-Learning actor loss is modulated by the derivative error,
+            so that when the critic is stable, the actor takes the criticism, 
+            and when the critic is learning, the actor only takes a tiny part of it.
+            """
+            actor_q_learning_loss_derivative_error = (
+                current_actor_q_loss_running_mean - actor_q_learning_loss
+            ).abs() / (current_actor_q_loss_running_mean.abs() + 1e-6)
+            if self.summary is not None:
+                self.summary.add_scalar(
+                    "Train / Actor Q Learning Derivative Error",
+                    actor_q_learning_loss_derivative_error,
+                    self.training_state.t,
+                )
+            actor_q_learning_derivative_correction = 1.0 / max(
+                1.0, 100.0 * actor_q_learning_loss_derivative_error
+            )
+            if self.summary is not None:
+                self.summary.add_scalar(
+                    "Train / Actor Q Learning Derivative Correction",
+                    actor_q_learning_derivative_correction,
+                    self.training_state.t,
+                )
+            self.actor_q_loss_running_mean(actor_q_learning_loss)
             # Only use derivative loss regulation if there is a down-regulation (dampening)
-            # if (
-            #    not math.isnan(actor_q_learning_derivative_correction)
-            #    and actor_q_learning_derivative_correction < 1.0
-            # ):
-            # actor_q_learning_loss = (
-            #    actor_q_learning_loss #* actor_q_learning_derivative_correction
-            # )
-            # if self.summary is not None:
-            #   self.summary.add_scalar(
-            #        "Train / Actor Q Learning Loss Corrected",
-            #        actor_q_learning_loss,
-            #        self.training_state.t,
-            #    )
+            if (
+                not math.isnan(actor_q_learning_derivative_correction)
+                and actor_q_learning_derivative_correction < 1.0
+            ):
+                actor_q_learning_loss = (
+                    actor_q_learning_loss * actor_q_learning_derivative_correction
+                )
+            if self.summary is not None:
+                self.summary.add_scalar(
+                    "Train / Actor Q Learning Loss Corrected",
+                    actor_q_learning_loss,
+                    self.training_state.t,
+                )
             actor_q_learning_loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 self.actor.parameters(), self.training_state.delayed_actor_grad_clip()
@@ -474,7 +487,13 @@ class IKAgent:
         current_thetas, target_pose = Environment.thetas_target_pose_from_state(state)
         _, _, _, entropy = self.actor(current_thetas, target_pose)
         self.actor_entropy_optimizer.zero_grad()
-        actor_entropy_loss = entropy.mean()
+        """
+        The entropy loss is the negative mean 
+        because we want to maximize entropy to
+        make maximum exploration to maximize
+        discovery of action space.
+        """
+        actor_entropy_loss = -entropy.mean()
         if self.summary is not None:
             self.summary.add_scalar(
                 "Train / Actor Entropy Loss",
@@ -535,14 +554,11 @@ if __name__ == "__main__":
     loss = Environment.compute_reward(
         open_chain, thetas, target_pose, torch.ones(6).cuda()
     ).mean()
-    print(loss)
-    # loss = se3.exp(target_pose).mean()
-    print(target_pose.grad)
-    # open_chain = urdf_robot.extract_open_chains(se3, 0.1)[-2].cuda()
-    # loss = open_chain.forward_kinematics(thetas[:, :5]).mean()
-    # loss.backward()
-    # print(thetas.grad)
-    # open_chain = urdf_robot.extract_open_chains(se3, 0.1)[-1].cuda()
-    # loss = open_chain.forward_kinematics(thetas[:, :]).mean()
-    # loss.backward()
-    # print(thetas.grad)
+    """
+    ERROR POSE
+    <class 'linguamechanica.se3.ImplicitDualQuaternion'>
+    tensor([-124.30992126464843750000, -146.22518920898437500000,
+            9.84337902069091796875,   -2.12095355987548828125,
+            1.88860976696014404297,    1.33572888374328613281], device='cuda:0')
+    tensor(1.09871234599268063903e-05, device='cuda:0')
+    """
