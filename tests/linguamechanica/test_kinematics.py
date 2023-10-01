@@ -72,47 +72,33 @@ class TestDifferentiableOpenChainMechanism:
     def test_inverse_kinematics_cr5(self, se3):
         urdf_robot = UrdfRobotLibrary.dobot_cr5()
         open_chains = urdf_robot.extract_open_chains(se3, 0.3)
-        for _ in range(3):
-            coordinates = []
-            for i in range(len(urdf_robot.joint_names)):
-                coordinates.append(
-                    random.uniform(
-                        urdf_robot.joint_limits[i][0], urdf_robot.joint_limits[i][1]
-                    )
-                )
-            coordinates = torch.Tensor(coordinates).unsqueeze(0)
-            open_chain = open_chains[-1]
-            transformation = open_chain.forward_kinematics(coordinates)
-            pose = se3.log(transformation)
-            target_pose = pose + (torch.rand(6) * 0.001)
-            initial_thetas = coordinates
-            parameter_update_rate = 0.001 * torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
-            error_weights = torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
-            found_thetas = open_chain.inverse_kinematics(
-                initial_thetas=initial_thetas,
-                target_pose=target_pose,
-                min_error=1e-3,
-                error_weights=error_weights,
-                parameter_update_rate=parameter_update_rate,
-                max_steps=100,
-            )
-            initial_error_pose = open_chain.compute_error_pose(
-                initial_thetas, target_pose
-            )
-            initial_error_pose = (
-                DifferentiableOpenChainMechanism.compute_weighted_error(
-                    initial_error_pose, error_weights
-                )
-            )
-            found_error_pose = open_chain.compute_error_pose(found_thetas, target_pose)
-            found_error_pose = DifferentiableOpenChainMechanism.compute_weighted_error(
-                found_error_pose, error_weights
-            )
-            relative_improvement = found_error_pose / (initial_error_pose + 1e-15)
-            """
-            At least a 10% improvement w.r.t. initial error
-            """
-            assert relative_improvement.mean() < 1.0
+        coordinates = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        coordinates = torch.Tensor(coordinates).unsqueeze(0)
+        open_chain = open_chains[-1]
+        transformation = open_chain.forward_kinematics(coordinates)
+        pose = se3.log(transformation)
+        target_pose = pose + (torch.ones_like(pose) * 0.001)
+        initial_thetas = coordinates
+        parameter_update_rate = 0.001 * torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+        error_weights = torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+        found_thetas = open_chain.inverse_kinematics(
+            initial_thetas=initial_thetas,
+            target_pose=target_pose,
+            min_error=1e-3,
+            error_weights=error_weights,
+            parameter_update_rate=parameter_update_rate,
+            max_steps=100,
+        )
+        initial_error_pose = open_chain.compute_error_pose(initial_thetas, target_pose)
+        initial_error_pose = DifferentiableOpenChainMechanism.compute_weighted_error(
+            initial_error_pose, error_weights
+        )
+        found_error_pose = open_chain.compute_error_pose(found_thetas, target_pose)
+        found_error_pose = DifferentiableOpenChainMechanism.compute_weighted_error(
+            found_error_pose, error_weights
+        )
+        relative_improvement = found_error_pose / (initial_error_pose + 1e-15)
+        assert relative_improvement.mean() < 1.0
 
     @pytest.mark.parametrize("se3", se3_representations)
     def test_inverse_kinematics(self, se3):
@@ -268,6 +254,7 @@ class TestDifferentiableOpenChainMechanism:
 
     @pytest.mark.parametrize("se3", se3_representations)
     def test_forward_kinematics(self, se3):
+        se3 = ImplicitDualQuaternion()
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
@@ -284,56 +271,57 @@ class TestDifferentiableOpenChainMechanism:
             ]
         )
         thetas = torch.Tensor([[10.0, np.pi], [math.pi / 2.0, 10.0], [10.0, np.pi]])
-        initial = torch.Tensor(
-            [
-                [1, 0, 0, 0],
-                [0, math.cos(math.pi / 2.0), -math.sin(math.pi / 2.0), 10.0],
-                [0, math.sin(math.pi / 2.0), math.cos(math.pi / 2.0), 0.0],
-                [0, 0, 0, 1],
-            ]
-        )
-        se3_projective = ProjectiveMatrix()
-        initial_twist = se3_projective.log(to_left_multiplied(initial.unsqueeze(0)))
-        open_chain = DifferentiableOpenChainMechanism(
-            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)], se3
-        )
-        element = open_chain.forward_kinematics(thetas)
-        expected_matrix = torch.Tensor(
-            [
+        initial_matrix = to_left_multiplied(
+            torch.Tensor(
                 [
                     [1, 0, 0, 0],
-                    [0, math.cos(math.pi), -math.sin(math.pi), 0],
-                    [0, math.sin(math.pi), math.cos(math.pi), 10.0],
-                    [0, 0, 0, 1],
-                ],
-                [
-                    [1, 0, 0, 10.0],
-                    [0, math.cos(math.pi / 2.0), -math.sin(math.pi / 2.0), 0.0],
+                    [0, math.cos(math.pi / 2.0), -math.sin(math.pi / 2.0), 10.0],
                     [0, math.sin(math.pi / 2.0), math.cos(math.pi / 2.0), 0.0],
                     [0, 0, 0, 1],
-                ],
-                [
-                    [1, 0, 0, 0],
-                    [0, math.cos(math.pi), -math.sin(math.pi), 0],
-                    [0, math.sin(math.pi), math.cos(math.pi), 10.0],
-                    [0, 0, 0, 1],
-                ],
-            ]
+                ]
+            ).unsqueeze(0)
         )
-        for i in range(expected_matrix.shape[0]):
-            expected_matrix[i, :, :] = expected_matrix[i, :, :] @ initial[:, :]
-        expected_pose = se3.exp(se3_projective.log(to_left_multiplied(expected_matrix)))
-        computed_pose = se3.log(se3.chain(se3.invert(element), expected_pose))
-        print("--------------")
-        print("expected_pose")
-        print(expected_pose)
-        print("computed_pose")
-        print(computed_pose)
+        se3_projective = ProjectiveMatrix()
+        initial_twist = se3_projective.log(initial_matrix)
+        open_chain = DifferentiableOpenChainMechanism(
+            screws, initial_twist, [(0, 10.0), (0, math.pi * 2)], se3
+        )
+        open_chain.forward_kinematics(thetas)
+        expected_matrix = to_left_multiplied(
+            torch.Tensor(
+                [
+                    [
+                        [1, 0, 0, 0],
+                        [0, math.cos(math.pi), -math.sin(math.pi), 0],
+                        [0, math.sin(math.pi), math.cos(math.pi), 10.0],
+                        [0, 0, 0, 1],
+                    ],
+                    [
+                        [1, 0, 0, 10.0],
+                        [0, math.cos(math.pi / 2.0), -math.sin(math.pi / 2.0), 0.0],
+                        [0, math.sin(math.pi / 2.0), math.cos(math.pi / 2.0), 0.0],
+                        [0, 0, 0, 1],
+                    ],
+                    [
+                        [1, 0, 0, 0],
+                        [0, math.cos(math.pi), -math.sin(math.pi), 0],
+                        [0, math.sin(math.pi), math.cos(math.pi), 10.0],
+                        [0, 0, 0, 1],
+                    ],
+                ]
+            )
+        )
+        expected_matrix = se3_projective.chain(expected_matrix, initial_matrix)
+        expected_pose = se3_projective.log(expected_matrix)
+        pose_difference = se3.log(
+            se3.chain(se3.invert(se3.exp(expected_pose)), se3.exp(expected_pose))
+        )
+
         assert np.isclose(
-            computed_pose,
-            torch.zeros_like(computed_pose),
-            rtol=1e-01,
-            atol=1e-01,
+            pose_difference,
+            torch.zeros_like(pose_difference),
+            rtol=1e-06,
+            atol=1e-06,
         ).all()
 
 

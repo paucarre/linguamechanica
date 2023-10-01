@@ -142,40 +142,39 @@ class ImplicitDualQuaternion(SE3):
     def exp(self, twist):
         coord_v = twist[:, :3]
         w = twist[:, 3:]
-        omega = torch.norm(w, p=2, dim=1, keepdim=True)
-        cos = omega.cos()
-        sin = omega.sin()
-        # TODO: it might be possible to only compute a subset of `omega_square`
-        # and `omega_quartic`
-        omega_square = omega * omega
-        omega_quartic = omega_square * omega_square
+        phi = torch.norm(w, p=2, dim=1, keepdim=True)
+        cos = phi.cos()
+        sin = phi.sin()
+        # TODO: it might be possible to only compute a subset of `phi_square`
+        # and `phi_quartic`
+        phi_square = phi * phi
+        phi_quartic = phi_square * phi_square
 
-        mu_r = torch.zeros_like(omega)
-        mu_r_singularity = omega.abs() < self.epsilon
-        mu_r[~mu_r_singularity] = sin[~mu_r_singularity] / omega[~mu_r_singularity]
+        mu_r = torch.zeros_like(phi)
+        mu_r_singularity = phi.abs() < self.epsilon
+        mu_r[~mu_r_singularity] = sin[~mu_r_singularity] / phi[~mu_r_singularity]
         mu_r[mu_r_singularity] = (
             1.0
-            - (omega_square[mu_r_singularity] / 6.0)
-            + (omega_quartic[mu_r_singularity] / 120.0)
+            - (phi_square[mu_r_singularity] / 6.0)
+            + (phi_quartic[mu_r_singularity] / 120.0)
         )
 
-        mu_d = torch.zeros_like(omega)
-        mu_d_singularity = omega_square.abs() < self.epsilon
+        mu_d = torch.zeros_like(phi)
+        mu_d_singularity = phi_square.abs() < self.epsilon
         mu_d[~mu_d_singularity] = (
             2.0 - (cos[~mu_d_singularity] * 2.0 * mu_r[~mu_d_singularity])
-        ) / omega_square[~mu_d_singularity]
+        ) / phi_square[~mu_d_singularity]
         mu_d[mu_d_singularity] = (
             (4.0 / 3.0)
-            - ((4.0 * omega_square[mu_d_singularity]) / 15.0)
-            + ((8.0 * omega_quartic[mu_d_singularity]) / 315.0)
+            - ((4.0 * phi_square[mu_d_singularity]) / 15.0)
+            + ((8.0 * phi_quartic[mu_d_singularity]) / 315.0)
         )
 
-        # TODO: this inner product should be computed w.o. einsum
-        sigma = torch.einsum("bi,bi->b", coord_v, w).unsqueeze(1)
+        gamma = (w * coord_v).sum(1).unsqueeze(1)
         h = torch.cat([mu_r * w, cos], 1)
         hv = self.extract_hv(h)
         cross = torch.cross(hv, coord_v)
-        v = ((2.0 * mu_r) * cross) + (cos * 2.0 * mu_r * coord_v) + (mu_d * sigma * w)
+        v = ((2.0 * mu_r) * cross) + (cos * 2.0 * mu_r * coord_v) + (mu_d * gamma * w)
         return torch.cat([h, v], 1)
 
     def atan2(self, sin, cos):
@@ -241,49 +240,46 @@ class ImplicitDualQuaternion(SE3):
         s = torch.norm(hv, p=2, dim=1, keepdim=True)
         c = self.extract_hw(h)
 
-        theta = self.atan2(s, c)
-        theta_square = theta * theta
-        theta_fourth = theta_square * theta_square
+        phi = torch.atan2(s, c)
+        phi_square = phi * phi
+        phi_fourth = phi_square * phi_square
 
-        omega = torch.zeros_like(hv)
-        omega_singularity = s.abs().squeeze() < self.epsilon
-        omega[~omega_singularity] = theta[~omega_singularity] * (
-            hv[~omega_singularity] / s[~omega_singularity]
+        w = torch.zeros_like(hv)
+        w_singularity = s.abs().squeeze() < self.epsilon
+        w[~w_singularity] = phi[~w_singularity] * (
+            hv[~w_singularity] / s[~w_singularity]
         )
-        omega[omega_singularity, :] = (
+        w[w_singularity, :] = (
             1.0
-            + (theta_square[omega_singularity, :] / 6.0)
-            + ((7.0 / 360.0) * theta_fourth[omega_singularity, :])
-        ) * hv[omega_singularity, :]
+            + (phi_square[w_singularity, :] / 6.0)
+            + ((7.0 / 360.0) * phi_fourth[w_singularity, :])
+        ) * hv[w_singularity, :]
 
-        mu_r = torch.zeros_like(theta)
+        mu_r = torch.zeros_like(phi)
         mu_r_singularity = s.abs() < self.epsilon
-        mu_r[~mu_r_singularity] = (c[~mu_r_singularity] * theta[~mu_r_singularity]) / s[
+        mu_r[~mu_r_singularity] = (c[~mu_r_singularity] * phi[~mu_r_singularity]) / s[
             ~mu_r_singularity
         ]
         mu_r[mu_r_singularity] = (
             1.0
-            - (theta_square[mu_r_singularity] / 3.0)
-            - (theta_fourth[mu_r_singularity] / 45.0)
+            - (phi_square[mu_r_singularity] / 3.0)
+            - (phi_fourth[mu_r_singularity] / 45.0)
         )
 
         mu_d = torch.zeros_like(mu_r)
-        mu_d_singularity = theta_square < self.epsilon
-        mu_d[~mu_d_singularity] = (1.0 - mu_r[~mu_d_singularity]) / theta_square[
+        mu_d_singularity = phi_square < self.epsilon
+        mu_d[~mu_d_singularity] = (1.0 - mu_r[~mu_d_singularity]) / phi_square[
             ~mu_d_singularity
         ]
         mu_d[mu_d_singularity] = (
             (1.0 / 3.0)
-            + (theta_square[mu_d_singularity] / 45.0)
-            + ((2.0 * theta_fourth[mu_d_singularity]) / 945.0)
+            + (phi_square[mu_d_singularity] / 45.0)
+            + ((2.0 * phi_fourth[mu_d_singularity]) / 945.0)
         )
 
-        # TODO: try to implement without `einsum`
-        inner = torch.einsum("bi,bi->b", v / 2.0, omega).unsqueeze(1)
-        log_v = (
-            (mu_d * inner * omega) + (mu_r * (v / 2.0)) + torch.cross((v / 2.0), omega)
-        )
-        return torch.cat([log_v, omega], 1)
+        inner = ((v / 2.0) * w).sum(1).unsqueeze(1)
+        log_v = (mu_d * inner * w) + (mu_r * (v / 2.0)) + torch.cross((v / 2.0), w)
+        return torch.cat([log_v, w], 1)
 
     def element_shape(self):
         return [4 + 3]
@@ -310,7 +306,7 @@ class ImplicitDualQuaternion(SE3):
         )
 
     def quat_conj(self, h):
-        return torch.cat([-h[:, :3], h[:, 3:4]], 1)
+        return torch.cat([-self.extract_hv(h), self.extract_hw(h)], 1)
 
     def extract_v(self, idq):
         return idq[:, 4:]
