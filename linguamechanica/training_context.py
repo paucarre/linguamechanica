@@ -7,20 +7,17 @@ import torch
 class TrainingState:
     max_level: int = 10
     level: int = 1
-    delayed_actor_grad_clip_base: float = 1.0
     geodesic_max_rollouts: int = 3
-    geodesic_threshold_done: float = 1e-6
     proportion_successful_to_increase_level: float = 0.2
     episode_batch_size: int = 1024
     max_std_dev = 0.1
     save_freq: int = 1000
     lr_actor: float = 1e-4
-    lr_actor_geodesic_base: float = 1e-4
-    gradient_clip_actor_geodesic_base: float = 1.0
+    lr_actor_geodesic: float = 1e-4
     lr_actor_entropy: float = 1e-6
-    lr_critic: float = 1e-6
+    lr_critic: float = 1e-4
     gamma: float = 0.99
-    policy_freq: int = 16
+    policy_freq: int = 4
     target_update_freq_cte: int = 16
     tau: float = 0.05
     eval_freq: int = 200
@@ -33,9 +30,6 @@ class TrainingState:
     max_steps_done: int = 20
     max_episodes_in_buffer: int = 10
 
-    def delayed_actor_grad_clip(self):
-        return self.delayed_actor_grad_clip_base / self.level
-
     def training_is_finished(self):
         return self.level > self.max_level or self.t > self.max_time_steps
 
@@ -46,20 +40,11 @@ class TrainingState:
             self.geodesic_max_rollouts,
         )
 
-    def critic_clip(self):
-        return 1000.0
-
     def target_update_freq(self):
         return self.target_update_freq_cte
 
     def initial_theta_std_dev(self):
         return 1.0 * self.level
-
-    def lr_actor_geodesic(self):
-        return self.lr_actor_geodesic_base / (10.0 * self.level)
-
-    def gradient_clip_actor_geodesic(self):
-        return self.gradient_clip_actor_geodesic_base / (100.0 * self.level)
 
     def pose_error_successful_threshold(self):
         return max(1.0 / (100.0 * self.level), 0.0001)

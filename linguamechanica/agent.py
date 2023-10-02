@@ -1,4 +1,3 @@
-import math
 import os
 from dataclasses import asdict
 
@@ -66,7 +65,7 @@ class IKAgent:
 
     def create_optimizers(self):
         self.actor_geodesic_optimizer = optim.Adam(
-            self.actor.parameters(), lr=self.training_state.lr_actor_geodesic()
+            self.actor.parameters(), lr=self.training_state.lr_actor_geodesic
         )
         self.actor_optimizer = optim.Adam(
             self.actor.parameters(), lr=self.training_state.lr_actor
@@ -245,7 +244,7 @@ class IKAgent:
             next_thetas = current_thetas + actions
             self.actor_optimizer.zero_grad()
             critic_prediction = self.critic_q1(next_thetas, target_pose)
-            current_actor_q_loss_running_mean = self.actor_q_loss_running_mean.compute()
+            self.actor_q_loss_running_mean.compute()
             actor_q_learning_loss = -critic_prediction.mean()
             if self.summary is not None:
                 self.summary.add_scalar(
@@ -253,55 +252,8 @@ class IKAgent:
                     actor_q_learning_loss,
                     self.training_state.t,
                 )
-            """
-            Explanation of the code down below:
-            The actor should not learn from the critic when 
-            the critic is not good enough at criticizing. 
-            The code below takes the approach to first extract
-            a derivate error on the critic. If the derivate error is high
-            means that the critic is learning about the actor and thus it is still not 
-            at a position to criticize the actor.
-            The Q-Learning actor loss is modulated by the derivative error,
-            so that when the critic is stable, the actor takes the criticism, 
-            and when the critic is learning, the actor only takes a tiny part of it.
-            """
-            actor_q_learning_loss_derivative_error = (
-                current_actor_q_loss_running_mean - actor_q_learning_loss
-            ).abs() / (current_actor_q_loss_running_mean.abs() + 1e-6)
-            if self.summary is not None:
-                self.summary.add_scalar(
-                    "Train / Actor Q Learning Derivative Error",
-                    actor_q_learning_loss_derivative_error,
-                    self.training_state.t,
-                )
-            actor_q_learning_derivative_correction = 1.0 / max(
-                1.0, 10.0 * actor_q_learning_loss_derivative_error
-            )
-            if self.summary is not None:
-                self.summary.add_scalar(
-                    "Train / Actor Q Learning Derivative Correction",
-                    actor_q_learning_derivative_correction,
-                    self.training_state.t,
-                )
-            self.actor_q_loss_running_mean(actor_q_learning_loss)
-            # Only use derivative loss regulation if there is a down-regulation (dampening)
-            if (
-                not math.isnan(actor_q_learning_derivative_correction)
-                and actor_q_learning_derivative_correction < 1.0
-            ):
-                actor_q_learning_loss = (
-                    actor_q_learning_loss * actor_q_learning_derivative_correction
-                )
-            if self.summary is not None:
-                self.summary.add_scalar(
-                    "Train / Actor Q Learning Loss Corrected",
-                    actor_q_learning_loss,
-                    self.training_state.t,
-                )
             actor_q_learning_loss.backward()
-            torch.nn.utils.clip_grad_norm_(
-                self.actor.parameters(), self.training_state.delayed_actor_grad_clip()
-            )
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
             self.actor_optimizer.step()
 
     def critic_update(self, state, reward, next_state, done):
@@ -331,12 +283,8 @@ class IKAgent:
         )
         self.q_loss_running_mean(quality_loss)
         quality_loss.backward()
-        torch.nn.utils.clip_grad_norm_(
-            self.critic_q1.parameters(), self.training_state.critic_clip()
-        )
-        torch.nn.utils.clip_grad_norm_(
-            self.critic_q2.parameters(), self.training_state.critic_clip()
-        )
+        torch.nn.utils.clip_grad_norm_(self.critic_q1.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(self.critic_q2.parameters(), 1.0)
         self.critic_q1_optimizer.step()
         self.critic_q2_optimizer.step()
         if self.summary is not None:
@@ -388,9 +336,7 @@ class IKAgent:
             )
         self.actor_geodesic_optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(
-            self.actor.parameters(), self.training_state.gradient_clip_actor_geodesic()
-        )
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
         self.actor_geodesic_optimizer.step()
         return loss
 
@@ -430,7 +376,7 @@ class IKAgent:
         """
         The entropy loss is the negative mean 
         because we want to maximize entropy to
-        make maximum exploration to maximize
+        make maximum exploration thus maximizing
         discovery of action space.
         """
         actor_entropy_loss = -entropy.mean()
