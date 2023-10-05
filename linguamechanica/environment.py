@@ -1,3 +1,4 @@
+import math
 import random
 
 import torch
@@ -148,6 +149,13 @@ class Environment:
         within_steps = self.current_step < self.training_state.max_steps_done
         self.current_step[within_steps] += 1
         self.current_thetas[:, :] += action[:, :]
+        self.current_thetas[self.current_thetas > math.pi] = self.current_thetas[
+            self.current_thetas > math.pi
+        ] - (2.0 * math.pi)
+        self.current_thetas[self.current_thetas < -math.pi] = self.current_thetas[
+            self.current_thetas < -math.pi
+        ] + (2.0 * math.pi)
+
         reward = Environment.compute_reward(
             self.open_chain,
             self.current_thetas,

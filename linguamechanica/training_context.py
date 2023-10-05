@@ -7,6 +7,7 @@ import torch
 class TrainingState:
     max_level: int = 10
     level: int = 1
+    zero_entropy_threshold: float = 0.1
     geodesic_max_rollouts: int = 3
     proportion_successful_to_increase_level: float = 0.2
     episode_batch_size: int = 1024
@@ -14,7 +15,7 @@ class TrainingState:
     save_freq: int = 1000
     lr_actor: float = 1e-4
     lr_actor_geodesic: float = 1e-4
-    lr_actor_entropy: float = 1e-6
+    lr_actor_entropy: float = 1e-8
     lr_critic: float = 1e-4
     gamma: float = 0.99
     policy_freq: int = 4

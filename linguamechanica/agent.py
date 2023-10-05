@@ -62,6 +62,7 @@ class IKAgent:
         self.create_optimizers()
         self.actor_q_loss_running_mean = RunningMean(window=500).to(open_chain.device)
         self.q_loss_running_mean = RunningMean(window=500).to(open_chain.device)
+        self.max_pose = None
 
     def create_optimizers(self):
         self.actor_geodesic_optimizer = optim.Adam(
@@ -187,6 +188,20 @@ class IKAgent:
         actions_mean, actions, log_probabilities, entropy = self.actor(
             current_thetas, target_pose
         )
+        """
+        For low pose error, std dev is ignored.
+        """
+        current_thetas = current_thetas + actions_mean.data
+        pose_error = -Environment.compute_reward(
+            self.open_chain,
+            current_thetas,
+            target_pose,
+            self.training_state.weights,
+        )
+        low_pose_error = (
+            pose_error.squeeze(1) < self.training_state.zero_entropy_threshold
+        )
+        actions[low_pose_error, :] = actions_mean[low_pose_error, :]
         if self.summary is not None:
             self.summary.add_scalar(
                 "Data / Action Mean",
@@ -370,16 +385,42 @@ class IKAgent:
         return state, action, reward, next_state, done
 
     def actor_entropy_update(self, state):
-        current_thetas, target_pose = Environment.thetas_target_pose_from_state(state)
-        _, _, _, entropy = self.actor(current_thetas, target_pose)
+        thetas, target_pose = Environment.thetas_target_pose_from_state(state)
+        angle_delta, _, _, entropy = self.actor(thetas, target_pose)
+        thetas = thetas + angle_delta.data
+        pose_error = -Environment.compute_reward(
+            self.open_chain,
+            thetas,
+            target_pose,
+            self.training_state.weights,
+        )
+
         self.actor_entropy_optimizer.zero_grad()
         """
+        
         The entropy loss is the negative mean 
         because we want to maximize entropy to
         make maximum exploration thus maximizing
         discovery of action space.
+
+        The entropy is modulated by the `pose_error`
+        as when the pose_error is close to zero, 
+        the entropy becomes less important (it is not
+        that important to explore)
+
+        We want the pose error to be at most 1.0
+        because we don't want to make entropy modulation
+        to amplify it. This is archived by dynamically 
+        estimate the `max_pose`.
         """
-        actor_entropy_loss = -entropy.mean()
+        current_max_pose, idx = pose_error.squeeze(1).max(0)
+        current_max_pose = current_max_pose.item()
+        if self.max_pose is None or current_max_pose > self.max_pose:
+            self.max_pose = current_max_pose
+        pose_error = (pose_error.data / self.max_pose) ** 2
+        # Small pose error should not boost entropy
+        pose_error[pose_error < self.training_state.zero_entropy_threshold] = 0.0
+        actor_entropy_loss = -(entropy.unsqueeze(1) * pose_error).mean()
         if self.summary is not None:
             self.summary.add_scalar(
                 "Train / Actor Entropy Loss",
