@@ -385,29 +385,28 @@ class IKAgent:
         return state, action, reward, next_state, done
 
     def actor_entropy_update(self, state):
+        """
+        The entropy loss is the negative mean
+        because we want to maximize entropy to
+        make maximum exploration thus maximizing
+        discovery of action space.
+        """
         thetas, target_pose = Environment.thetas_target_pose_from_state(state)
         angle_delta, _, _, entropy = self.actor(thetas, target_pose)
         thetas = thetas + angle_delta.data
+        """        
+        The entropy is modulated by the `pose_error`
+        as when the pose_error is close to zero, 
+        the entropy becomes less important (it is not
+        that important to explore)
+        """
         pose_error = -Environment.compute_reward(
             self.open_chain,
             thetas,
             target_pose,
             self.training_state.weights,
         )
-
-        self.actor_entropy_optimizer.zero_grad()
         """
-        
-        The entropy loss is the negative mean 
-        because we want to maximize entropy to
-        make maximum exploration thus maximizing
-        discovery of action space.
-
-        The entropy is modulated by the `pose_error`
-        as when the pose_error is close to zero, 
-        the entropy becomes less important (it is not
-        that important to explore)
-
         We want the pose error to be at most 1.0
         because we don't want to make entropy modulation
         to amplify it. This is archived by dynamically 
@@ -417,16 +416,22 @@ class IKAgent:
         current_max_pose = current_max_pose.item()
         if self.max_pose is None or current_max_pose > self.max_pose:
             self.max_pose = current_max_pose
-        pose_error = (pose_error.data / self.max_pose) ** 2
-        # Small pose error should not boost entropy
-        pose_error[pose_error < self.training_state.zero_entropy_threshold] = 0.0
-        actor_entropy_loss = -(entropy.unsqueeze(1) * pose_error).mean()
+        entropy_weight = (pose_error.data / self.max_pose) ** 2
+        """
+        If the pose error is small entropy is ignored as it's
+        not used.
+        """
+        entropy_weight[
+            pose_error < self.training_state.zero_entropy_threshold
+        ] = 0.0
+        actor_entropy_loss = -(entropy.unsqueeze(1) * entropy_weight).mean()
         if self.summary is not None:
             self.summary.add_scalar(
                 "Train / Actor Entropy Loss",
                 actor_entropy_loss,
                 self.training_state.t,
             )
+        self.actor_entropy_optimizer.zero_grad()
         actor_entropy_loss.backward()
         self.actor_entropy_optimizer.step()
 

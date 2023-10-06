@@ -132,7 +132,6 @@ class InverseKinematicsActor(nn.Module):
         """
         action_log_std_dev = self.max_log_std_dev - F.softplus(x)
         action_std_dev = torch.exp(action_log_std_dev)
-        # print(action_std_dev.mean().item(), action_std_dev.std().item(), action_std_dev.min().item(), action_std_dev.max().item(), manifold_error[:, 3].abs().mean().item(), manifold_error[:, 4].abs().mean().item())
         angle_delta_probabilities = Normal(angle_delta_mean, action_std_dev)
         angle_delta_action = angle_delta_probabilities.sample()
         # Here the clip is done on a sample which has no gradient, thus the clipping won't affect

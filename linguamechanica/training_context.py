@@ -11,11 +11,11 @@ class TrainingState:
     geodesic_max_rollouts: int = 3
     proportion_successful_to_increase_level: float = 0.2
     episode_batch_size: int = 1024
-    max_std_dev = 0.1
+    max_std_dev = 0.002
     save_freq: int = 1000
     lr_actor: float = 1e-4
     lr_actor_geodesic: float = 1e-4
-    lr_actor_entropy: float = 1e-8
+    lr_actor_entropy: float = 1e-10
     lr_critic: float = 1e-4
     gamma: float = 0.99
     policy_freq: int = 4
