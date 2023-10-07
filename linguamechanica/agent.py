@@ -5,7 +5,6 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from dacite import from_dict
-from torchmetrics.aggregation import RunningMean
 from torchrl.data import ReplayBuffer
 from torchrl.data.replay_buffers import ListStorage
 
@@ -60,14 +59,9 @@ class IKAgent:
         )
         self.total_it = 0
         self.create_optimizers()
-        self.actor_q_loss_running_mean = RunningMean(window=500).to(open_chain.device)
-        self.q_loss_running_mean = RunningMean(window=500).to(open_chain.device)
         self.max_pose = None
 
     def create_optimizers(self):
-        self.actor_geodesic_optimizer = optim.Adam(
-            self.actor.parameters(), lr=self.training_state.lr_actor_geodesic
-        )
         self.actor_optimizer = optim.Adam(
             self.actor.parameters(), lr=self.training_state.lr_actor
         )
@@ -96,7 +90,6 @@ class IKAgent:
                 "actor": self.actor.state_dict(),
                 # Optimizers
                 "actor_optimizer": self.actor_optimizer.state_dict(),
-                "actor_geodesic_optimizer": self.actor_geodesic_optimizer.state_dict(),
                 "critic_q1_optimizer": self.critic_q1_optimizer.state_dict(),
                 "critic_q2_optimizer": self.critic_q2_optimizer.state_dict(),
             }
@@ -125,9 +118,6 @@ class IKAgent:
         agent.actor_target.load_state_dict(model_dictionary["actor_target"])
         # Optimizers
         agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
-        agent.actor_geodesic_optimizer.load_state_dict(
-            model_dictionary["actor_geodesic_optimizer"]
-        )
         agent.critic_q1_optimizer.load_state_dict(
             model_dictionary["critic_q1_optimizer"]
         )
@@ -151,7 +141,6 @@ class IKAgent:
         self.critic_q2 = self.critic_q2.cuda()
         self.critic_target_q1 = self.critic_target_q1.cuda()
         self.critic_target_q2 = self.critic_target_q2.cuda()
-        self.actor_q_loss_running_mean = self.actor_q_loss_running_mean.cuda()
         return self
 
     def inference(self, iterations, state, environment, top_n):
@@ -243,16 +232,13 @@ class IKAgent:
                     + (1 - self.training_state.tau) * target_param.data
                 )
 
-    def delayed_actor_update(self, state):
+    def compute_delayed_actor_q_learning_loss(self, state, actions):
         if self.total_it % self.training_state.policy_freq == 0:
             current_thetas, target_pose = Environment.thetas_target_pose_from_state(
                 state
             )
-            actions, _, _, _ = self.actor(current_thetas, target_pose)
             next_thetas = current_thetas + actions
-            self.actor_optimizer.zero_grad()
             critic_prediction = self.critic_q1(next_thetas, target_pose)
-            self.actor_q_loss_running_mean.compute()
             actor_q_learning_loss = -critic_prediction.mean()
             if self.summary is not None:
                 self.summary.add_scalar(
@@ -260,9 +246,8 @@ class IKAgent:
                     actor_q_learning_loss,
                     self.training_state.t,
                 )
-            actor_q_learning_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
-            self.actor_optimizer.step()
+            return actor_q_learning_loss
+        return 0.0
 
     def critic_update(self, state, reward, next_state, done):
         with torch.no_grad():
@@ -289,7 +274,6 @@ class IKAgent:
         quality_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(
             current_Q2, target_Q
         )
-        self.q_loss_running_mean(quality_loss)
         quality_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.critic_q1.parameters(), 1.0)
         torch.nn.utils.clip_grad_norm_(self.critic_q2.parameters(), 1.0)
@@ -314,6 +298,7 @@ class IKAgent:
         initial_reward = Environment.compute_reward(
             self.open_chain, thetas, target_pose, self.training_state.weights
         )
+        angle_delta = None
         entropy = None
         for rollout in range(
             self.training_state.actor_geodesic_optimization_rollouts()
@@ -329,7 +314,8 @@ class IKAgent:
             self.training_state.t,
         )
         geodesic_loss = (
-            (final_reward - initial_reward.data) / (initial_reward.data + self.training_state.geodesic_loss_epsilon)
+            (final_reward - initial_reward.data)
+            / (initial_reward.data + self.training_state.geodesic_loss_epsilon)
         ).mean()
         if self.summary is not None:
             self.summary.add_scalar(
@@ -343,20 +329,37 @@ class IKAgent:
                 geodesic_loss,
                 self.training_state.t,
             )
-        return geodesic_loss, entropy, final_reward
+        return geodesic_loss, entropy, final_reward, angle_delta
 
-    def actor_geodesic_entropy_optimization(self, state):
-        geodesic_loss, entropy, final_reward = self.compute_actor_geodesic_loss(state)
+    def actor_optimization(self, state):
+        (
+            geodesic_loss,
+            entropy,
+            final_reward,
+            angle_delta,
+        ) = self.compute_actor_geodesic_loss(state)
         actor_entropy_loss = self.compute_actor_entropy_loss(
             entropy, pose_error=-final_reward
         )
-        loss = geodesic_loss + (
-            actor_entropy_loss * self.training_state.lr_actor_entropy
+        q_learning_actor_loss = self.compute_delayed_actor_q_learning_loss(
+            state, angle_delta
         )
-        self.actor_geodesic_optimizer.zero_grad()
+        loss = (
+            (geodesic_loss * self.training_state.actor_geodesic_weight)
+            + (actor_entropy_loss * self.training_state.actor_entropy_weight)
+            + (q_learning_actor_loss * self.training_state.actor_q_learning_weight)
+        )
+        if self.summary is not None:
+            self.summary.add_scalar(
+                "Train / Actor Loss",
+                loss,
+                self.training_state.t,
+            )
+
+        self.actor_optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
-        self.actor_geodesic_optimizer.step()
+        self.actor_optimizer.step()
         return loss
 
     def sample_from_buffer(self):
@@ -423,7 +426,6 @@ class IKAgent:
     def train_buffer(self):
         self.total_it += 1
         state, action, reward, next_state, done = self.sample_from_buffer()
-        self.actor_geodesic_entropy_optimization(state)
+        self.actor_optimization(state)
         self.critic_update(state, reward, next_state, done)
-        self.delayed_actor_update(state)
         self.update_target_models()

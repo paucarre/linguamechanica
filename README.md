@@ -88,6 +88,13 @@ Then launch any of the command line programs such as:
 python -m linguamechanica.test --checkpoint 256000 --target_thetas 0.4,-0.6,0.3,-0.5,0.5,0.2 --iterations 100 --samples 10000
 ```
 
+# Docker
+
+See the [docker documentation](docker/README.md) to setup a docker.
+Note that the way Docker is approached for `Linugua Mechanica` is to 
+set up a docker image with a mapped local home folder.
+
+
 # References
  - [Robust and efficient forward, differential, and inverse kinematics using dual quaternions](http://www.neil.dantam.name/papers/dantam2020robust.pdf). [Neil T. Dantam](http://www.neil.dantam.name/)
  - [A micro Lie theory for state estimation in robotics](https://arxiv.org/pdf/1812.01537.pdf)
