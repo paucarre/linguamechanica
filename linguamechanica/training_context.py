@@ -5,8 +5,9 @@ import torch
 
 @dataclass
 class TrainingState:
-    max_level: int = 10
+    max_level: int = 4
     level: int = 1
+    geodesic_loss_epsilon: float = 1e-3
     zero_entropy_threshold: float = 0.1
     geodesic_max_rollouts: int = 3
     proportion_successful_to_increase_level: float = 0.2

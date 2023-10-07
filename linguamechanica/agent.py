@@ -71,9 +71,6 @@ class IKAgent:
         self.actor_optimizer = optim.Adam(
             self.actor.parameters(), lr=self.training_state.lr_actor
         )
-        self.actor_entropy_optimizer = optim.Adam(
-            self.actor.parameters(), lr=self.training_state.lr_actor_entropy
-        )
         self.critic_q1_optimizer = optim.Adam(
             self.critic_q1.parameters(), lr=self.training_state.lr_critic
         )
@@ -100,7 +97,6 @@ class IKAgent:
                 # Optimizers
                 "actor_optimizer": self.actor_optimizer.state_dict(),
                 "actor_geodesic_optimizer": self.actor_geodesic_optimizer.state_dict(),
-                "actor_entropy_optimizer": self.actor_entropy_optimizer.state_dict(),
                 "critic_q1_optimizer": self.critic_q1_optimizer.state_dict(),
                 "critic_q2_optimizer": self.critic_q2_optimizer.state_dict(),
             }
@@ -131,9 +127,6 @@ class IKAgent:
         agent.actor_optimizer.load_state_dict(model_dictionary["actor_optimizer"])
         agent.actor_geodesic_optimizer.load_state_dict(
             model_dictionary["actor_geodesic_optimizer"]
-        )
-        agent.actor_entropy_optimizer.load_state_dict(
-            model_dictionary["actor_entropy_optimizer"]
         )
         agent.critic_q1_optimizer.load_state_dict(
             model_dictionary["critic_q1_optimizer"]
@@ -316,15 +309,16 @@ class IKAgent:
         corr = self.is_corrupted(tensor).sum(1) > 0
         return tensor[corr, :]
 
-    def actor_geodesic_optimization(self, state):
+    def compute_actor_geodesic_loss(self, state):
         thetas, target_pose = Environment.thetas_target_pose_from_state(state)
         initial_reward = Environment.compute_reward(
             self.open_chain, thetas, target_pose, self.training_state.weights
-        ).mean()
+        )
+        entropy = None
         for rollout in range(
             self.training_state.actor_geodesic_optimization_rollouts()
         ):
-            angle_delta, _, _, _ = self.actor(thetas, target_pose)
+            angle_delta, _, _, entropy = self.actor(thetas, target_pose)
             thetas = thetas + angle_delta
         final_reward = Environment.compute_reward(
             self.open_chain,
@@ -333,22 +327,32 @@ class IKAgent:
             self.training_state.weights,
             self.summary,
             self.training_state.t,
+        )
+        geodesic_loss = (
+            (final_reward - initial_reward.data) / (initial_reward.data + self.training_state.geodesic_loss_epsilon)
         ).mean()
         if self.summary is not None:
             self.summary.add_scalar(
                 "Train / Final Reward",
-                final_reward,
+                final_reward.mean(),
                 self.training_state.t,
             )
-        loss = (
-            (final_reward - initial_reward.data) / (initial_reward.data + 1e-3)
-        ).mean()
         if self.summary is not None:
             self.summary.add_scalar(
                 "Train / Actor Reward Times Worse Loss",
-                loss,
+                geodesic_loss,
                 self.training_state.t,
             )
+        return geodesic_loss, entropy, final_reward
+
+    def actor_geodesic_entropy_optimization(self, state):
+        geodesic_loss, entropy, final_reward = self.compute_actor_geodesic_loss(state)
+        actor_entropy_loss = self.compute_actor_entropy_loss(
+            entropy, pose_error=-final_reward
+        )
+        loss = geodesic_loss + (
+            actor_entropy_loss * self.training_state.lr_actor_entropy
+        )
         self.actor_geodesic_optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
@@ -384,35 +388,20 @@ class IKAgent:
         done = done.to(self.actor.device())
         return state, action, reward, next_state, done
 
-    def actor_entropy_update(self, state):
+    def compute_actor_entropy_loss(self, entropy, pose_error):
         """
         The entropy loss is the negative mean
         because we want to maximize entropy to
         make maximum exploration thus maximizing
         discovery of action space.
         """
-        thetas, target_pose = Environment.thetas_target_pose_from_state(state)
-        angle_delta, _, _, entropy = self.actor(thetas, target_pose)
-        thetas = thetas + angle_delta.data
-        """        
-        The entropy is modulated by the `pose_error`
-        as when the pose_error is close to zero, 
-        the entropy becomes less important (it is not
-        that important to explore)
-        """
-        pose_error = -Environment.compute_reward(
-            self.open_chain,
-            thetas,
-            target_pose,
-            self.training_state.weights,
-        )
         """
         We want the pose error to be at most 1.0
         because we don't want to make entropy modulation
         to amplify it. This is archived by dynamically 
         estimate the `max_pose`.
         """
-        current_max_pose, idx = pose_error.squeeze(1).max(0)
+        current_max_pose, idx = pose_error.data.squeeze(1).max(0)
         current_max_pose = current_max_pose.item()
         if self.max_pose is None or current_max_pose > self.max_pose:
             self.max_pose = current_max_pose
@@ -421,9 +410,7 @@ class IKAgent:
         If the pose error is small entropy is ignored as it's
         not used.
         """
-        entropy_weight[
-            pose_error < self.training_state.zero_entropy_threshold
-        ] = 0.0
+        entropy_weight[pose_error < self.training_state.zero_entropy_threshold] = 0.0
         actor_entropy_loss = -(entropy.unsqueeze(1) * entropy_weight).mean()
         if self.summary is not None:
             self.summary.add_scalar(
@@ -431,15 +418,12 @@ class IKAgent:
                 actor_entropy_loss,
                 self.training_state.t,
             )
-        self.actor_entropy_optimizer.zero_grad()
-        actor_entropy_loss.backward()
-        self.actor_entropy_optimizer.step()
+        return actor_entropy_loss
 
     def train_buffer(self):
         self.total_it += 1
         state, action, reward, next_state, done = self.sample_from_buffer()
-        self.actor_geodesic_optimization(state)
+        self.actor_geodesic_entropy_optimization(state)
         self.critic_update(state, reward, next_state, done)
         self.delayed_actor_update(state)
-        self.actor_entropy_update(state)
         self.update_target_models()
