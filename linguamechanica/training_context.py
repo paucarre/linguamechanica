@@ -5,12 +5,14 @@ import torch
 
 @dataclass
 class TrainingState:
+    # Level Configuration
     max_level: int = 4
     level: int = 1
+    proportion_successful_to_increase_level: float = 0.9
+    # Training Configuration
     geodesic_loss_epsilon: float = 1e-3
     zero_entropy_threshold: float = 0.1
     geodesic_max_rollouts: int = 3
-    proportion_successful_to_increase_level: float = 0.2
     episode_batch_size: int = 1024
     max_std_dev = 0.002
     save_freq: int = 1000
@@ -23,15 +25,16 @@ class TrainingState:
     policy_freq: int = 4
     target_update_freq_cte: int = 16
     tau: float = 0.05
-    eval_freq: int = 200
-    max_time_steps: float = 1e6
-    data_generation_without_actor_iterations: int = 20
     qlearning_batch_size: int = 32
     max_action_clip: float = torch.pi
+    max_time_steps: float = 1e6
+    max_episodes_in_buffer: int = 10
+    data_generation_without_actor_iterations: int = 20
     t: int = 0
+    eval_freq: int = 200
+    # Error Configuration
     weights = torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
     max_steps_done: int = 20
-    max_episodes_in_buffer: int = 10
 
     def training_is_finished(self):
         return self.level > self.max_level or self.t > self.max_time_steps
@@ -50,7 +53,7 @@ class TrainingState:
         return 1.0 * self.level
 
     def pose_error_successful_threshold(self):
-        return max(1.0 / (100.0 * self.level), 0.0001)
+        return max(1.0 / (100.0 * (2 ** self.level)), 1e-4)
 
     def replay_buffer_max_size(self):
         return (

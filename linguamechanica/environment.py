@@ -74,7 +74,8 @@ class Environment:
     def reset_to_random_targets(self, summary=None):
         target_thetas_batch = self.uniformly_sample_parameters_within_constraints()
         return self._reset_to_target_thetas_batch(
-            target_thetas_batch=target_thetas_batch
+            target_thetas_batch=target_thetas_batch,
+            summary=summary
         )
 
     def reset_to_target_thetas(self, target_thetas, summary=None):
@@ -83,7 +84,7 @@ class Environment:
             target_thetas.unsqueeze(0).repeat(samples, 1).to(self.device)
         )
         return self._reset_to_target_thetas_batch(
-            target_thetas_batch=target_thetas_batch
+            target_thetas_batch=target_thetas_batch            
         )
 
     def _reset_to_target_thetas_batch(self, target_thetas_batch, summary=None):

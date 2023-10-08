@@ -43,7 +43,7 @@ def evaluate_policy(open_chain, agent, training_state, summary):
 )
 @click.option(
     "--level",
-    help="IK Game Level (theta noise is '0.1 * level'). By default starts at level in configuration (default to 1) or the one stored in the checkpoint",
+    help="IK Game Level. By default starts at level in configuration (default to 1) or the one stored in the checkpoint",
     type=int,
     required=False,
 )
