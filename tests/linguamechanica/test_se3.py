@@ -22,7 +22,21 @@ class TestSE3:
             [1, 0, 0, torch.pi / 4.0, 0, 0],
         ]
     ).float()
-    expected_exp = torch.tensor(
+
+    coords_square = torch.tensor(
+        [
+            [2, 0, 0, 0, 0, 0],
+            [0, 2, 0, 0, 0, 0],
+            [0, 0, 2, 0, 0, 0],
+            [0, 0, 0, torch.pi, 0, 0],
+            [0, 0, 0, torch.pi / 2.0, 0, 0],
+            [0, 0, 0, 0, torch.pi / 2.0, 0],
+            [0, 0, 0, 0, 0, torch.pi / 2.0],
+            [2, 0, 0, torch.pi / 2.0, 0, 0],
+        ]
+    ).float()
+
+    expected_exp_idq = torch.tensor(
         [
             [0, 0, 0, 1, 1, 0, 0],
             [0, 0, 0, 1, 0, 1, 0],
@@ -36,28 +50,32 @@ class TestSE3:
         requires_grad=True,
     ).float()
 
-    expected_exp_squared = torch.tensor(
-        [
-            [0, 0, 0, 1, 2, 0, 0],
-            [0, 0, 0, 1, 0, 2, 0],
-            [0, 0, 0, 1, 0, 0, 2],
-            [math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 0, 0, 0],
-            [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 0, 0, 0],
-            [0, math.sin(math.pi / 4.0), 0, math.cos(math.pi / 4.0), 0, 0, 0],
-            [0, 0, math.sin(math.pi / 4.0), math.cos(math.pi / 4.0), 0, 0, 0],
-            [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 2, 0, 0],
-        ]
-    ).float()
-
     epsilon = 1e-6
 
-    def test_exp(self):
+    def test_exp_idq(self):
         se3 = ImplicitDualQuaternion()
-        se3_idq = se3.exp(self.coords)
-        assert (self.expected_exp - se3_idq).abs().mean(1).mean(0).item() < self.epsilon
+        element = se3.exp(self.coords)
+        computed_zero_pose = se3.log(
+            se3.chain(se3.invert(self.expected_exp_idq), element)
+        )
+        assert computed_zero_pose.abs().mean().item() < self.epsilon
 
-    def test_log(self):
-        se3 = ImplicitDualQuaternion()
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_exp_log_1(self, se3):
+        ImplicitDualQuaternion()
+        computed_coord = se3.log(se3.exp(self.coords))
+        assert (self.coords[:, :3] - computed_coord[:, :3]).abs().mean(1).mean(
+            0
+        ).item() < self.epsilon
+        assert (self.coords[:, 3:].cos() - computed_coord[:, 3:].cos()).abs().mean(
+            1
+        ).mean(0).item() < self.epsilon
+        assert (self.coords[:, 3:].sin() - computed_coord[:, 3:].sin()).abs().mean(
+            1
+        ).mean(0).item() < self.epsilon
+
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_exp_log_2(self, se3):
         se3_idq = se3.exp(self.coords)
         se3_log = se3.log(se3_idq)
         assert (self.coords - se3_log).abs().mean(1).mean(0).item() < self.epsilon
@@ -81,13 +99,19 @@ class TestSE3:
         se3_batch = se3.chain(se3.exp(pose_rot1), se3.exp(pose_trans1))
         assert (se3.exp(se3.log(se3_batch)) - se3_batch).abs().sum() < self.epsilon
 
-    def test_chain(self):
-        se3 = ImplicitDualQuaternion()
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_chain(self, se3):
         se3_idq = se3.exp(self.coords)
-        exp_squared = se3.chain(se3_idq, se3_idq)
-        assert (self.expected_exp_squared - exp_squared).abs().mean(1).mean(
+        squared = se3.log(se3.chain(se3_idq, se3_idq))
+        assert (self.coords_square[:, :3] - squared[:, :3]).abs().mean(1).mean(
             0
         ).item() < self.epsilon
+        assert (self.coords_square[:, 3:].cos() - squared[:, 3:].cos()).abs().mean(
+            1
+        ).mean(0).item() < self.epsilon
+        assert (self.coords_square[:, 3:].sin() - squared[:, 3:].sin()).abs().mean(
+            1
+        ).mean(0).item() < self.epsilon
 
     @pytest.mark.parametrize("se3", se3_representations)
     def test_invert(self, se3):

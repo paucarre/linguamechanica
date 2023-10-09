@@ -117,24 +117,6 @@ class DifferentiableOpenChainMechanism:
         )
         current_trans_to_target = current_trans_to_target.to(thetas.device)
         error_pose = self.se3.log(current_trans_to_target)
-        """
-        error_pose_transformation_rec = self.se3.exp(error_pose)
-        error_pose_rec = self.se3.log(error_pose_transformation_rec)
-        if summary is not None:
-            proportional_error = ((error_pose - error_pose_rec).abs()).mean(1)
-            max_proportional_error, idx = proportional_error.max(0)
-            if max_proportional_error.mean() > 1e-5:
-                torch.set_printoptions(precision=20)
-                print("ERROR POSE")
-                print(type(self.se3))
-                print(error_pose[idx, :].data)
-                print(max_proportional_error.data)
-            summary.add_scalar(
-                "Debugging / Error pose reconstruction",
-                max_proportional_error.mean(),
-                t,
-            )
-        """
         return error_pose
 
     def compute_weighted_error(error_pose, weights):

@@ -327,7 +327,6 @@ class TestDifferentiableOpenChainMechanism:
 class UrdfRobot:
     @pytest.mark.parametrize("se3", se3_representations)
     def test_extract_open_chains(self, se3):
-        se3_projective = ProjectiveMatrix()
         urdf_robot = UrdfRobotLibrary.dobot_cr5()
         open_chains = urdf_robot.extract_open_chains(se3, 0.3)
         for _ in range(100):
