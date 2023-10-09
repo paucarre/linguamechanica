@@ -19,7 +19,7 @@ class TrainingState:
     lr_actor: float = 1e-4
     actor_geodesic_weight: float = 1.0
     actor_entropy_weight: float = 1e-10
-    actor_q_learning_weight: float = 1.0
+    actor_q_learning_weight: float = 1e-2
     lr_critic: float = 1e-4
     gamma: float = 0.99
     policy_freq: int = 4

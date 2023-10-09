@@ -254,7 +254,6 @@ class TestDifferentiableOpenChainMechanism:
 
     @pytest.mark.parametrize("se3", se3_representations)
     def test_forward_kinematics(self, se3):
-        se3 = ImplicitDualQuaternion()
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
