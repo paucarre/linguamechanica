@@ -1,16 +1,3 @@
-##
-## How do I select the base image?
-## Check the host nvidia version by running: nvcc --version
-## That will give you your host's cuda version.
-## Then try to find one that matches from the release notes
-## of nVidia's images: https://docs.nvidia.com/deeplearning/frameworks/tensorflow-release-notes/rel_21-12.html#rel_21-12
-## Finally, the tag in: https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-tensorflow/tags
-## You will have to also change the installation of pytorch so that the cuda version also fits
-##
-## For the current version, the host, the docker image and pytorch are CUDA 11.5
-##
-## First you can try the base by using: docker run --runtime=nvidia --rm nvcr.io/nvidia/tensorflow:21.12-tf2-py3 /bin/bash
-##
 FROM nvcr.io/nvidia/tensorflow:21.12-tf2-py3
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -98,5 +85,5 @@ RUN sudo mkdir /etc/ros && \
     sudo chown -R ros:ros /usr/local/lib/python3.8/dist-packages
 
 RUN sudo apt update && \
-    sudo apt install --no-install-recommends -y apt-transport-https libignition-math4-dev code ninja-build && \
+    sudo apt install --no-install-recommends -y apt-transport-https libignition-math4-dev ninja-build && \
     sudo apt-get autoclean

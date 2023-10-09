@@ -76,3 +76,52 @@ RUN sudo apt-get update && \
     libc++-7-dev libc++abi-7-dev ninja-build libxi-dev gfortran libtbb-dev \
     libosmesa6-dev libudev-dev autoconf libtool flex libkdtree++-dev && \
     sudo apt-get autoclean
+
+RUN sudo apt-get install wget gpg && \
+    wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg && \
+    sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg && \
+    sudo sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list' && \
+    rm -f packages.microsoft.gpg && \
+    sudo apt install -y apt-transport-https && \
+    sudo apt update && \
+    sudo apt install -y code && \
+    sudo apt-get autoclean
+
+RUN sudo DEBIAN_FRONTEND=noninteractive  apt install -y intel-mkl && \
+    echo 'deb [trusted=yes] https://developer.download.nvidia.com/hpc-sdk/ubuntu/amd64 /' | sudo tee /etc/apt/sources.list.d/nvhpc.list && \
+    sudo apt-get update -y && \
+    sudo apt-get install -y nvhpc-22-1 && \
+    sudo rm -rf /etc/alternatives/cuda && \
+    sudo rm -rf /usr/local/cuda && \
+    sudo ln -s /opt/nvidia/hpc_sdk/Linux_x86_64/22.1/cuda/11.5  /usr/local/cuda && \
+    sudo cp -ans /opt/nvidia/hpc_sdk/Linux_x86_64/22.1/math_libs/11.5/targets/x86_64-linux/include/* /opt/nvidia/hpc_sdk/Linux_x86_64/22.1/cuda/11.5/targets/x86_64-linux/include/ && \
+    sudo cp -ans /opt/nvidia/hpc_sdk/Linux_x86_64/22.1/math_libs/11.5/targets/x86_64-linux/lib/* /opt/nvidia/hpc_sdk/Linux_x86_64/22.1/cuda/11.5/targets/x86_64-linux/lib/ && \
+    pip3 uninstall -y tensorflow && sudo chmod -R o+w /usr/bin/ && pip3 install --upgrade numpy && \
+    sudo apt-get autoclean
+
+
+RUN cd /home/ros/ &&\
+    git clone --branch v2.50.0 https://github.com/IntelRealSense/librealsense.git && \
+    cd librealsense && \
+    ./scripts/setup_udev_rules.sh && \
+    mkdir build && cd build && \
+    cmake .. -DBUILD_EXAMPLES=true -DCMAKE_BUILD_TYPE=release -DFORCE_RSUSB_BACKEND=false -DBUILD_WITH_CUDA=false && make -j$(($(nproc)-1))
+
+RUN cd /home/ros/librealsense/build && sudo make install
+RUN sudo usermod -a -G video ros
+RUN cd /home/ros/librealsense && \
+    sudo cp config/99-realsense-libusb.rules /etc/udev/rules.d/ && \
+    sudo /lib/systemd/systemd-udevd --daemon && \
+    sudo udevadm control --reload-rules && udevadm trigger
+
+
+#RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash && \
+#    source ~/.bashrc && \
+#    nvm install v16.20.2 && \
+#    npm install --global yarn && \
+#    npm install -g npm@3.7.5 && \
+#    yarn global add code-server && \
+
+
+
+

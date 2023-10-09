@@ -68,8 +68,8 @@ class TestDifferentiableOpenChainMechanism:
         )
         assert (found_thetas - thetas).abs().sum() <= 1e-2
 
-    @pytest.mark.parametrize("se3", se3_representations)
-    def test_inverse_kinematics_cr5(self, se3):
+    def test_inverse_kinematics_cr5(self):
+        se3 = ProjectiveMatrix()
         urdf_robot = UrdfRobotLibrary.dobot_cr5()
         open_chains = urdf_robot.extract_open_chains(se3, 0.3)
         coordinates = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

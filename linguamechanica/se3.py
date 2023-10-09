@@ -8,27 +8,27 @@ class SE3:
     def exp(self, twist: torch.Tensor) -> torch.Tensor:
         self.raise_not_implemented_error("exp")
 
-    def log(self, element: torch.Tensor) -> torch.Tensor:
+    def log(self, se3_batch: torch.Tensor) -> torch.Tensor:
         self.raise_not_implemented_error("log")
 
     def chain(
-        self, left_element: torch.Tensor, right_element: torch.Tensor
+        self, left_se3_batch: torch.Tensor, right_se3_batch: torch.Tensor
     ) -> torch.Tensor:
         self.raise_not_implemented_error("chain")
 
-    def invert(self, element: torch.Tensor) -> torch.Tensor:
+    def invert(self, se3_batch: torch.Tensor) -> torch.Tensor:
         self.raise_not_implemented_error("invert")
 
     def identity(self, batch_size: int) -> torch.Tensor:
         self.raise_not_implemented_error("identity")
 
-    def act_vector(self, element: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
+    def act_vector(self, se3_batch: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
         self.raise_not_implemented_error("act_vector")
 
-    def act_point(self, element: torch.Tensor, point: torch.Tensor) -> torch.Tensor:
+    def act_point(self, se3_batch: torch.Tensor, point: torch.Tensor) -> torch.Tensor:
         self.raise_not_implemented_error("act_point")
 
-    def repeat(self, element: torch.Tensor, batch_size) -> torch.Tensor:
+    def repeat(self, se3_batch: torch.Tensor, batch_size) -> torch.Tensor:
         self.raise_not_implemented_error("repeat")
 
     def raise_not_implemented_error(self, name):
@@ -65,19 +65,23 @@ class ProjectiveMatrix(SE3):
     def element_shape(self):
         return [4, 4]
 
-    def repeat(self, element: torch.Tensor, batch_size: int) -> torch.Tensor:
-        if len(element.shape) == 2:
-            return element.unsqueeze(0).repeat(batch_size, 1, 1)
-        elif len(element.shape) == 3:
-            return element.repeat(batch_size, 1, 1)
+    def repeat(self, se3_batch: torch.Tensor, batch_size: int) -> torch.Tensor:
+        if len(se3_batch.shape) == 2:
+            return se3_batch.unsqueeze(0).repeat(batch_size, 1, 1)
+        elif len(se3_batch.shape) == 3:
+            return se3_batch.repeat(batch_size, 1, 1)
 
-    def act_vector(self, idq: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
-        # self.raise_not_implemented_error("act_vector")
-        pass
+    def act_vector(
+        self, se3_batch: torch.tensor, vectors: torch.Tensor
+    ) -> torch.Tensor:
+        vectors = torch.cat([vectors, vectors.new_zeros(vectors.shape[0], 1)], 1)
+        vectors = vectors @ se3_batch
+        return vectors[:, :, :3]
 
-    def act_point(self, idq: torch.Tensor, point: torch.Tensor) -> torch.Tensor:
-        # self.raise_not_implemented_error("act_point")
-        pass
+    def act_point(self, se3_batch: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
+        points = torch.cat([points, points.new_ones(points.shape[0], 1)], 1)
+        points = points @ se3_batch
+        return points[:, :, :3]
 
 
 class ImplicitDualQuaternion(SE3):
@@ -109,7 +113,26 @@ class ImplicitDualQuaternion(SE3):
         self.epsilon = epsilon
 
     def act_vector(self, idq, vector):
-        return self.quat_mul(idq, self.vect_to_quat(vector))[:3]
+        vectors = vector.shape[0]
+        idqs = idq.shape[0]
+        idq = idq.repeat_interleave(vectors, 0)
+        vector = vector.repeat(idqs, 1)
+        h = self.extract_h(idq)
+        acted_vector = self.quat_mul(
+            h, self.quat_mul(self.vect_to_quat(vector), self.quat_conj(h))
+        )[:, :3]
+        return acted_vector.view(idqs, vectors, -1)
+
+    def act_point(self, idq, point):
+        points = point.shape[0]
+        idqs = idq.shape[0]
+        idq = idq.repeat_interleave(points, 0)
+        point = point.repeat(idqs, 1)
+        point = torch.cat([point, point.new_zeros(point.shape[0], 3)], 1)
+        point_idq = self.exp(point)
+        transformed_points = self.chain(idq, point_idq)
+        self.exp(self.log(transformed_points))
+        return transformed_points[:, 4:].view(idqs, points, -1)
 
     def chain(self, left_idq, right_idq):
         lh = self.extract_h(left_idq)
@@ -140,6 +163,7 @@ class ImplicitDualQuaternion(SE3):
         return torch.cat([zero_h, zero_v], 1)
 
     def exp(self, twist):
+        twist = twist / 2.0
         coord_v = twist[:, :3]
         w = twist[:, 3:]
         phi = torch.norm(w, p=2, dim=1, keepdim=True)
@@ -173,7 +197,7 @@ class ImplicitDualQuaternion(SE3):
         gamma = (w * coord_v).sum(1).unsqueeze(1)
         h = torch.cat([mu_r * w, cos], 1)
         hv = self.extract_hv(h)
-        cross = torch.cross(hv, coord_v)
+        cross = torch.cross(hv, coord_v, dim=1)
         v = ((2.0 * mu_r) * cross) + (cos * 2.0 * mu_r * coord_v) + (mu_d * gamma * w)
         return torch.cat([h, v], 1)
 
@@ -222,20 +246,25 @@ class ImplicitDualQuaternion(SE3):
         )
 
         inner = ((v / 2.0) * w).sum(1).unsqueeze(1)
-        log_v = (mu_d * inner * w) + (mu_r * (v / 2.0)) + torch.cross((v / 2.0), w)
-        return torch.cat([log_v, w], 1)
+        log_v = (
+            (mu_d * inner * w) + (mu_r * (v / 2.0)) + torch.cross((v / 2.0), w, dim=1)
+        )
+        return torch.cat([log_v, w], 1) * 2.0
 
     def element_shape(self):
         return [4 + 3]
 
-    def repeat(self, element: torch.Tensor, batch_size: int) -> torch.Tensor:
-        if len(element.shape) == 1:
-            return element.unsqueeze(0).repeat(batch_size, 1)
-        elif len(element.shape) == 2:
-            return element.repeat(batch_size, 1)
+    def repeat(self, se3_batch: torch.Tensor, batch_size: int) -> torch.Tensor:
+        if len(se3_batch.shape) == 1:
+            return se3_batch.unsqueeze(0).repeat(batch_size, 1)
+        elif len(se3_batch.shape) == 2:
+            return se3_batch.repeat(batch_size, 1)
 
     def vect_to_quat(self, vector):
         return torch.cat([vector, torch.zeros_like(vector[:, 0:1])], 1)
+
+    def point_to_quat(self, vector):
+        return torch.cat([vector, torch.ones_like(vector[:, 0:1])], 1)
 
     def quat_mul(self, lh, rh):
         ai, bi, ci, di = 3, 0, 1, 2

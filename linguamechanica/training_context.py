@@ -53,7 +53,7 @@ class TrainingState:
         return 1.0 * self.level
 
     def pose_error_successful_threshold(self):
-        return max(1.0 / (100.0 * (2 ** self.level)), 1e-4)
+        return max(1.0 / (100.0 * (2**self.level)), 1e-4)
 
     def replay_buffer_max_size(self):
         return (

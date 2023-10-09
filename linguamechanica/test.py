@@ -4,7 +4,6 @@ from dataclasses import dataclass
 import click
 import pybullet as p
 import torch
-from pytorch3d import transforms
 
 from linguamechanica.agent import IKAgent
 from linguamechanica.environment import Environment
@@ -28,8 +27,10 @@ def get_logger():
 
 def setup_pybullet(urdf, with_target_robot):
     p.connect(p.GUI)
+    # , options="--opengl2")
     p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
     robot_id = p.loadURDF(urdf, [0, 0, 0])
+    print(robot_id)
     target_robot_id = -1
     initial_robot_id = -1
     if with_target_robot:
@@ -53,7 +54,7 @@ def setup_inference(
 ):
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
     # TODO: make this generic
-    se3 = ProjectiveMatrix()
+    se3 = UrdfRobotLibrary()
     open_chain = urdf_robot.extract_open_chains(se3, 0.3)[-1].cuda()
     agent = IKAgent.from_checkpoint(
         open_chain=open_chain, checkpoint_id=checkpoint
@@ -84,21 +85,25 @@ def setup_inference(
 def draw_pose_as_axis(
     pose, parent_uid=0, life_time=0, len_damp=0.1, lineWidth=3.0, cd=1.0
 ):
-    axis_coords = (
-        torch.tensor(
-            [
-                [0.0, 0.0, 0.0, 1.0],
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-            ]
-        ).cuda()
-        @ transforms.se3_exp_map(pose.unsqueeze(0))[0, :, :]
-    )
-    po = axis_coords[0, :3].tolist()
-    px = (axis_coords[0, :3] + axis_coords[1, :3] * len_damp).tolist()
-    py = (axis_coords[0, :3] + axis_coords[2, :3] * len_damp).tolist()
-    pz = (axis_coords[0, :3] + axis_coords[3, :3] * len_damp).tolist()
+    se3_rep = se3.exp(pose.unsqueeze(0))
+    axis_origin = torch.tensor(
+        [
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    ).cuda()
+    axis_origin = se3.act_point(se3_rep, axis_orient)
+    axis_orient = torch.tensor(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ]
+    ).cuda()
+    axis_orient = se3.act_vector(se3_rep, axis_orient)
+    po = axis_origin[0, :].tolist()
+    px = (axis_origin[0, :] + axis_orient[0, :] * len_damp).tolist()
+    py = (axis_origin[0, :] + axis_orient[1, :] * len_damp).tolist()
+    pz = (axis_origin[0, :] + axis_orient[2, :] * len_damp).tolist()
     p.addUserDebugLine(
         po,
         px,
@@ -206,7 +211,9 @@ def solve_ik(robot_ids, iterations, state, agent, environment, initial_reward):
 @click.option("--target_pose", type=str, required=False)
 def test(checkpoint, urdf, level, samples, iterations, target_thetas, target_pose):
     with_target_robot = target_thetas is not None
+    print("setup_pybullet ik...")
     robot_ids = setup_pybullet(urdf, with_target_robot)
+    print("setup_inference ik...")
     environment, agent, state, initial_reward = setup_inference(
         robot_ids, urdf, checkpoint, samples, level, target_thetas, target_pose
     )

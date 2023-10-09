@@ -1,9 +1,15 @@
 import math
 import torch
-from linguamechanica.se3 import ImplicitDualQuaternion
+from linguamechanica.se3 import ImplicitDualQuaternion, ProjectiveMatrix
+import pytest
+
+se3_representations = [
+    ProjectiveMatrix(),
+    ImplicitDualQuaternion(),
+]
 
 
-class TestImplicitDualQuaternion:
+class TestSE3:
     coords = torch.tensor(
         [
             [1, 0, 0, 0, 0, 0],
@@ -18,6 +24,20 @@ class TestImplicitDualQuaternion:
     ).float()
     expected_exp = torch.tensor(
         [
+            [0, 0, 0, 1, 1, 0, 0],
+            [0, 0, 0, 1, 0, 1, 0],
+            [0, 0, 0, 1, 0, 0, 1],
+            [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 0, 0, 0],
+            [math.sin(math.pi / 8.0), 0, 0, math.cos(math.pi / 8.0), 0, 0, 0],
+            [0, math.sin(math.pi / 8.0), 0, math.cos(math.pi / 8.0), 0, 0, 0],
+            [0, 0, math.sin(math.pi / 8.0), math.cos(math.pi / 8.0), 0, 0, 0],
+            [math.sin(math.pi / 8.0), 0, 0, math.cos(math.pi / 8.0), 1, 0, 0],
+        ],
+        requires_grad=True,
+    ).float()
+
+    expected_exp_squared = torch.tensor(
+        [
             [0, 0, 0, 1, 2, 0, 0],
             [0, 0, 0, 1, 0, 2, 0],
             [0, 0, 0, 1, 0, 0, 2],
@@ -26,20 +46,6 @@ class TestImplicitDualQuaternion:
             [0, math.sin(math.pi / 4.0), 0, math.cos(math.pi / 4.0), 0, 0, 0],
             [0, 0, math.sin(math.pi / 4.0), math.cos(math.pi / 4.0), 0, 0, 0],
             [math.sin(math.pi / 4.0), 0, 0, math.cos(math.pi / 4.0), 2, 0, 0],
-        ],
-        requires_grad=True,
-    ).float()
-
-    expected_exp_squared = torch.tensor(
-        [
-            [0, 0, 0, 1, 4, 0, 0],
-            [0, 0, 0, 1, 0, 4, 0],
-            [0, 0, 0, 1, 0, 0, 4],
-            [math.sin(math.pi), 0, 0, math.cos(math.pi), 0, 0, 0],
-            [math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 0, 0, 0],
-            [0, math.sin(math.pi / 2.0), 0, math.cos(math.pi / 2.0), 0, 0, 0],
-            [0, 0, math.sin(math.pi / 2.0), math.cos(math.pi / 2.0), 0, 0, 0],
-            [math.sin(math.pi / 2.0), 0, 0, math.cos(math.pi / 2.0), 4, 0, 0],
         ]
     ).float()
 
@@ -56,6 +62,25 @@ class TestImplicitDualQuaternion:
         se3_log = se3.log(se3_idq)
         assert (self.coords - se3_log).abs().mean(1).mean(0).item() < self.epsilon
 
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_log_rot_trans(self, se3):
+        pose_rot1 = torch.tensor(
+            [
+                [0, 0, 0, 0, 0, torch.pi / 2.0],
+                [0, 0, 0, 0, 0, torch.pi / 2.0],
+                [0, 0, 0, 0, 0, torch.pi / 2.0],
+            ]
+        ).float()
+        pose_trans1 = torch.tensor(
+            [
+                [1, 0, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0, 0],
+            ]
+        ).float()
+        se3_batch = se3.chain(se3.exp(pose_rot1), se3.exp(pose_trans1))
+        assert (se3.exp(se3.log(se3_batch)) - se3_batch).abs().sum() < self.epsilon
+
     def test_chain(self):
         se3 = ImplicitDualQuaternion()
         se3_idq = se3.exp(self.coords)
@@ -64,20 +89,86 @@ class TestImplicitDualQuaternion:
             0
         ).item() < self.epsilon
 
-    def test_invert(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_invert(self, se3):
         se3 = ImplicitDualQuaternion()
-        exp_squared_inv = se3.invert(self.expected_exp_squared)
-        zeros = se3.log(se3.chain(exp_squared_inv, self.expected_exp_squared))
+        exp_squared_inv = se3.invert(se3.exp(self.coords))
+        zeros = se3.log(se3.chain(exp_squared_inv, se3.exp(self.coords)))
         assert (zeros - torch.zeros_like(zeros)).abs().mean(1).mean(
             0
         ).item() < self.epsilon
 
-    def test_identity(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_identity(self, se3):
         se3 = ImplicitDualQuaternion()
-        identities = se3.identity(self.expected_exp_squared.shape[0])
-        exp_squared = se3.chain(
-            se3.chain(identities, self.expected_exp_squared), identities
-        )
-        assert (exp_squared - self.expected_exp_squared).abs().mean(1).mean(
+        identities = se3.identity(self.coords.shape[0])
+        chained = se3.chain(se3.chain(identities, se3.exp(self.coords)), identities)
+        assert (chained - se3.exp(self.coords)).abs().mean(1).mean(
             0
         ).item() < self.epsilon
+
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_act_vector(self, se3):
+        se3 = ImplicitDualQuaternion()
+        vectors = torch.tensor(
+            [
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1],
+            ]
+        ).float()
+        poses = torch.tensor([[1, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, torch.pi]]).float()
+        expected_acted_vectors = torch.tensor(
+            [
+                # Vectors have no effect on translation
+                [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                [[-1, 0, 0], [0, -1, 0], [0, 0, 1]],
+            ]
+        ).float()
+        acted_vector = se3.act_vector(se3.exp(poses), vectors)
+        assert (expected_acted_vectors - acted_vector).abs().mean() < self.epsilon
+
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_act_vector_two_rot(self, se3):
+        vectors = torch.tensor(
+            [
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1],
+            ]
+        ).float()
+        pose_rot1 = torch.tensor([[0, 0, 0, 0, 0, torch.pi / 2.0]]).float()
+        pose_rot2 = torch.tensor(
+            [
+                [0, 0, 0, torch.pi / 2.0, 0, 0],
+            ]
+        ).float()
+
+        expected_acted_vectors = torch.tensor(
+            [[[0, 1, 0], [0, 0, 1], [1, 0, 0]]]
+        ).float()
+        se3_rot_trans = se3.chain(se3.exp(pose_rot1), se3.exp(pose_rot2))
+        acted_vector = se3.act_vector(se3_rot_trans, vectors)
+        assert (expected_acted_vectors - acted_vector).abs().mean() < self.epsilon
+
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_act_points_rot_trans(self, se3):
+        points = torch.tensor(
+            [
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1],
+            ]
+        ).float()
+        pose_rot1 = torch.tensor([[0, 0, 0, 0, 0, torch.pi / 2.0]]).float()
+        pose_trans1 = torch.tensor(
+            [
+                [1, 0, 0, 0, 0, 0],
+            ]
+        ).float()
+        expected_acted_points = torch.tensor(
+            [[[0, 2, 0], [-1, 1, 0], [0, 1, 1]]]
+        ).float()
+        se3_batch = se3.chain(se3.exp(pose_rot1), se3.exp(pose_trans1))
+        acted_points = se3.act_point(se3_batch, points)
+        assert (expected_acted_points - acted_points).abs().mean() < self.epsilon

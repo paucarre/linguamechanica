@@ -8,5 +8,3 @@ python -c 'import pytorch3d; print(f"wget https://raw.githubusercontent.com/pauc
 python -c 'import pytorch3d; print(f"wget https://raw.githubusercontent.com/paucarre/pytorch3d/se3_log_map_fix/pytorch3d/transforms/so3.py -O  {pytorch3d.__path__[0]}/transforms/so3.py")' | bash
 # Torch Metrics
 pip install torchmetrics
-
-python -c 'import pytrasform3d; print(pytrasform3d.__path__[0])'
