@@ -115,7 +115,6 @@ class TestSE3:
 
     @pytest.mark.parametrize("se3", se3_representations)
     def test_invert(self, se3):
-        se3 = ImplicitDualQuaternion()
         exp_squared_inv = se3.invert(se3.exp(self.coords))
         zeros = se3.log(se3.chain(exp_squared_inv, se3.exp(self.coords)))
         assert (zeros - torch.zeros_like(zeros)).abs().mean(1).mean(
@@ -124,16 +123,12 @@ class TestSE3:
 
     @pytest.mark.parametrize("se3", se3_representations)
     def test_identity(self, se3):
-        se3 = ImplicitDualQuaternion()
         identities = se3.identity(self.coords.shape[0])
         chained = se3.chain(se3.chain(identities, se3.exp(self.coords)), identities)
-        assert (chained - se3.exp(self.coords)).abs().mean(1).mean(
-            0
-        ).item() < self.epsilon
+        assert (chained - se3.exp(self.coords)).abs().mean().item() < self.epsilon
 
     @pytest.mark.parametrize("se3", se3_representations)
     def test_act_vector(self, se3):
-        se3 = ImplicitDualQuaternion()
         vectors = torch.tensor(
             [
                 [1, 0, 0],
