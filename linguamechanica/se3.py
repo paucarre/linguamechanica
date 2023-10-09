@@ -131,7 +131,6 @@ class ImplicitDualQuaternion(SE3):
         point = torch.cat([point, point.new_zeros(point.shape[0], 3)], 1)
         point_idq = self.exp(point)
         transformed_points = self.chain(idq, point_idq)
-        self.exp(self.log(transformed_points))
         return transformed_points[:, 4:].view(idqs, points, -1)
 
     def chain(self, left_idq, right_idq):
