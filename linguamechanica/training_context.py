@@ -115,17 +115,13 @@ class EpisodeState:
               =>  0  : No improvement, final reward is equal to initial reward
               => -1  : 100% improvement, final reward is zero
             """
-            if torch.isnan(reward_times_worse).sum() > 0:
-                print("REWARD TIMES WORSE")
-                print(f"Time Step {time_step}")
-                print(torch.isnan(reward_times_worse).sum())
             summary.add_scalar(
-                f"{self.label} / Reward Times Worse",
+                f"{self.label} / Done Reward Times Worse",
                 reward_times_worse,
                 time_step,
             )
             summary.add_scalar(
-                f"{self.label} / Acc. Disc. Reward",
+                f"{self.label} / Done Acc. Disc. Reward",
                 self.discounted_reward.mean(),
                 time_step,
             )

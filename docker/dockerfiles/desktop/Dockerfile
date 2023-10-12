@@ -114,6 +114,16 @@ RUN cd /home/ros/librealsense && \
     sudo /lib/systemd/systemd-udevd --daemon && \
     sudo udevadm control --reload-rules && udevadm trigger
 
+RUN sudo apt-get update -y && \
+    sudo apt-get install -y libnlopt-guile0 libnlopt-dev libnlopt0 libnlopt-cxx0 libnlopt-cxx-dev && \
+    sudo apt-get autoclean
+
+RUN cd /home/ros && \
+    wget https://download.pytorch.org/libtorch/cu118/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu118.zip && \
+    unzip libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu118.zip && \
+    rm -rf libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcu118.zip
+
+ENV Torch_DIR=/home/ros/libtorch
 
 #RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash && \
 #    source ~/.bashrc && \

@@ -19,27 +19,12 @@ autoflake = "^2.2.0"
 fvcore = "^0.1.5.post20221221"
 iopath = "^0.1.10"
 jupyterlab = "4.0.1"
-seaborn = "0.12.2"
-tensorboard = "2.12.3"
-#torchmetrics = "0.11.4"
 tqdm = "^4.65.0"
-#torch = [
-#    {url = "https://download.pytorch.org/whl/cu118/torch-2.0.1%2Bcu118-cp310-cp310-linux_x86_64.whl", platform = "linux", python = ">=3.10 <3.11"},
-#]
-#lightning = "^2.0.2"
-#torchvision = "0.15.2+cu118"
-#pytorch3d = [
-#    {url = "https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu113_pyt1110/pytorch3d-0.7.2-cp310-cp310-linux_x86_64.whl", platform = "linux", python = ">=3.10 <3.11"},
-#]
 pytransform3d = "^3.4.0"
-#gymnasium = {extras = ["accept-rom-license", "atari"], version = "^0.28.1"}
-#gym = "^0.26.2"
 pytest-coverage = "^0.0"
-#torchrl = "^0.1.1"
 pyright = "^1.1.322"
 dacite = "^1.8.1"
 click = "^8.1.7"
-#torchmetrics = "^1.1.2"
 isort = "^5.12.0"
 shapely = "^2.0.1"
 sympy = "^1.12"
@@ -50,20 +35,6 @@ pybullet = "^3.2.5"
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
-[[tool.poetry.source]]
-name = "pytorch-cuda"
-url = "https://download.pytorch.org/whl/cu118"
-priority = "supplemental"
-
-[[tool.poetry.source]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-priority = "supplemental"
-
-[[tool.poetry.source]]
-name = "pytorch3d"
-url = "https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu113_pyt1110"
-priority = "supplemental"
 
 [[tool.poetry.source]]
 name = "PyPI"
