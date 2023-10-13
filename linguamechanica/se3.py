@@ -147,7 +147,6 @@ class ImplicitDualQuaternion(SE3):
         return torch.cat([h, v[:, :3]], 1)
 
     def invert(self, idq):
-        # TODO: test this
         h_inv = self.quat_conj(self.extract_h(idq))
         v = self.extract_v(idq)
         v_inv = -self.quat_mul(
@@ -261,9 +260,6 @@ class ImplicitDualQuaternion(SE3):
 
     def vect_to_quat(self, vector):
         return torch.cat([vector, torch.zeros_like(vector[:, 0:1])], 1)
-
-    def point_to_quat(self, vector):
-        return torch.cat([vector, torch.ones_like(vector[:, 0:1])], 1)
 
     def quat_mul(self, lh, rh):
         ai, bi, ci, di = 3, 0, 1, 2
