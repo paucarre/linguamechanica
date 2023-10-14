@@ -7,17 +7,10 @@ from linguamechanica.kinematics import UrdfRobotLibrary
 from linguamechanica.se3 import ImplicitDualQuaternion
 
 
-def target_thetas_reset(environment, target_thetas):
+def parse_list_of_ints( target_thetas):
     target_thetas = [float(theta) for theta in target_thetas.split(",")]
     target_thetas = torch.tensor(target_thetas)
-    return environment.reset_to_target_thetas(target_thetas)
-
-
-def target_pose_reset(environment, target_pose):
-    target_pose = [float(element) for element in target_pose.split(",")]
-    target_pose = torch.tensor(target_pose)
-    return environment.reset_to_target_pose(target_pose)
-
+    return target_thetas
 
 def setup_inference(urdf, checkpoint, samples, target_thetas, target_pose):
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
@@ -32,10 +25,10 @@ def setup_inference(urdf, checkpoint, samples, target_thetas, target_pose):
         open_chain=open_chain, training_state=agent.training_state
     ).cuda()
     state, initial_reward = None, None
-    if target_thetas is not None:
-        state, initial_reward = target_thetas_reset(environment, target_thetas)
+    if target_thetas is not None:        
+        state, initial_reward = environment.reset_to_target_thetas(target_thetas)
     elif target_pose is not None:
-        state, initial_reward = target_pose_reset(environment, target_pose)
+        state, initial_reward = environment.reset_to_target_pose(target_pose)
     thetas, target_pose = Environment.thetas_target_pose_from_state(state)
     return environment, agent, state, initial_reward
 
@@ -81,8 +74,9 @@ def inference_results_to_csv(thetas_sorted, reward_sorted):
 @click.option("--target_thetas", type=str, required=False)
 @click.option("--target_pose", type=str, required=False)
 @click.option("--top_n", type=int, default=10, required=True)
-def inference(checkpoint, urdf, samples, iterations, target_thetas, target_pose, top_n):
-    target_thetas is not None
+def inference(checkpoint, urdf, samples, iterations, target_thetas, target_pose, top_n):    
+    target_thetas = parse_list_of_ints(target_thetas)
+    target_pose = parse_list_of_ints(target_pose)
     environment, agent, state, initial_reward = setup_inference(
         urdf, checkpoint, samples, target_thetas, target_pose
     )
