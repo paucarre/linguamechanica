@@ -7,10 +7,10 @@ from linguamechanica.kinematics import UrdfRobotLibrary
 from linguamechanica.se3 import ImplicitDualQuaternion
 
 
-def parse_list_of_ints( target_thetas):
-    target_thetas = [float(theta) for theta in target_thetas.split(",")]
-    target_thetas = torch.tensor(target_thetas)
-    return target_thetas
+def parse_list_of_ints(list_of_ints):
+    list_of_ints = [float(element) for element in list_of_ints.split(",")]
+    list_of_ints = torch.tensor(list_of_ints)
+    return list_of_ints
 
 def setup_inference(urdf, checkpoint, samples, target_thetas, target_pose):
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
