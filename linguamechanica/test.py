@@ -100,7 +100,7 @@ class VisualTester:
                     environment.target_thetas[0, i].item(),
                 )
         elif self.target_pose is not None:
-            state, initial_reward = environment.reset_to_target_thetas(self.target_pose)
+            state, initial_reward = environment.reset_to_target_pose(self.target_pose)
         thetas, target_pose = Environment.thetas_target_pose_from_state(state)
         self.draw_pose_as_axis(target_pose[0, :], self.robot_ids.robot_id)
         for i in range(p.getNumJoints(self.robot_ids.robot_id)):
