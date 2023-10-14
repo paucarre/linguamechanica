@@ -8,9 +8,12 @@ from linguamechanica.se3 import ImplicitDualQuaternion
 
 
 def parse_list_of_ints(list_of_ints):
-    list_of_ints = [float(element) for element in list_of_ints.split(",")]
-    list_of_ints = torch.tensor(list_of_ints)
-    return list_of_ints
+    if list_of_ints is not None:
+        list_of_ints = [float(element) for element in list_of_ints.split(",")]
+        list_of_ints = torch.tensor(list_of_ints)
+        return list_of_ints
+    else:
+        return None
 
 def setup_inference(urdf, checkpoint, samples, target_thetas, target_pose):
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
@@ -74,7 +77,7 @@ def inference_results_to_csv(thetas_sorted, reward_sorted):
 @click.option("--target_thetas", type=str, required=False)
 @click.option("--target_pose", type=str, required=False)
 @click.option("--top_n", type=int, default=10, required=True)
-def inference(checkpoint, urdf, samples, iterations, target_thetas, target_pose, top_n):    
+def inference(checkpoint, urdf, samples, iterations, target_thetas, target_pose, top_n):
     target_thetas = parse_list_of_ints(target_thetas)
     target_pose = parse_list_of_ints(target_pose)
     environment, agent, state, initial_reward = setup_inference(

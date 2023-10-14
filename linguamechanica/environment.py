@@ -91,7 +91,7 @@ class Environment:
         target_transformation = self.open_chain.forward_kinematics(self.target_thetas)
         self.target_pose = self.open_chain.se3.log(target_transformation)
         noise = (
-            torch.randn_like(self.target_thetas)
+            torch.rand_like(self.target_thetas)
             * self.training_state.initial_theta_std_dev()
         )
         self.current_thetas = (self.target_thetas.detach().clone() + noise).to(

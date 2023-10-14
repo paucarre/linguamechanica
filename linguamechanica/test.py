@@ -7,7 +7,7 @@ import torch
 
 from linguamechanica.agent import IKAgent
 from linguamechanica.environment import Environment
-from linguamechanica.inference import target_pose_reset, target_thetas_reset
+from linguamechanica.inference import parse_list_of_ints
 from linguamechanica.kinematics import UrdfRobotLibrary
 from linguamechanica.se3 import ImplicitDualQuaternion
 
@@ -92,15 +92,15 @@ class VisualTester:
         ).cuda()
         state, initial_reward = None, None
         if self.target_thetas is not None:
-            state, initial_reward = target_thetas_reset(environment, self.target_thetas)
+            state, initial_reward = environment.reset_to_target_thetas(self.target_thetas)
             for i in range(p.getNumJoints(self.robot_ids.robot_id)):
                 p.resetJointState(
                     self.robot_ids.target_robot_id,
                     i,
                     environment.target_thetas[0, i].item(),
                 )
-        elif target_pose is not None:
-            state, initial_reward = target_pose_reset(environment, target_pose)
+        elif self.target_pose is not None:
+            state, initial_reward = environment.reset_to_target_thetas(self.target_pose)
         thetas, target_pose = Environment.thetas_target_pose_from_state(state)
         self.draw_pose_as_axis(target_pose[0, :], self.robot_ids.robot_id)
         for i in range(p.getNumJoints(self.robot_ids.robot_id)):
@@ -246,6 +246,8 @@ class VisualTester:
 def test(checkpoint, urdf, level, samples, iterations, target_thetas, target_pose):
     # TODO: make this generic
     se3 = ImplicitDualQuaternion()
+    target_thetas = parse_list_of_ints(target_thetas)
+    target_pose = parse_list_of_ints(target_pose)
     tester = VisualTester(
         se3, iterations, target_thetas, urdf, checkpoint, samples, level, target_pose
     )

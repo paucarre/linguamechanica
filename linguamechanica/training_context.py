@@ -50,7 +50,7 @@ class TrainingState:
         return self.target_update_freq_cte
 
     def initial_theta_std_dev(self):
-        return 1.0 * self.level
+        return torch.pi
 
     def pose_error_successful_threshold(self):
         return max(1.0 / (100.0 * (2**self.level)), 1e-4)
