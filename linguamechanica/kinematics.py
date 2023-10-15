@@ -13,8 +13,6 @@ from pytransform3d.urdf import (
     parse_urdf,
 )
 
-from linguamechanica.se3 import ProjectiveMatrix
-
 
 def to_left_multiplied(right_multiplied):
     """
@@ -304,8 +302,12 @@ class UrdfRobot:
                 np.expand_dims(np.concatenate([screw[3:], screw[:3]]), axis=0)
             )
             screw_torch = torch.Tensor(np.concatenate(screws.copy()))
-            initial_twist = exponential_coordinates_from_transform(transform_zero.copy())
-            initial_twist = np.expand_dims(np.concatenate([initial_twist[3:], initial_twist[:3]]), axis=0)
+            initial_twist = exponential_coordinates_from_transform(
+                transform_zero.copy()
+            )
+            initial_twist = np.expand_dims(
+                np.concatenate([initial_twist[3:], initial_twist[:3]]), axis=0
+            )
             initial_twist = torch.from_numpy(initial_twist).float()
             open_chain = DifferentiableOpenChainMechanism(
                 screw_torch, initial_twist, self.joint_limits[: i + 1], se3

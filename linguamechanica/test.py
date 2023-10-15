@@ -5,10 +5,12 @@ import click
 import pybullet as p
 import torch
 
-from linguamechanica.agent import IKAgent
 from linguamechanica.environment import Environment
-from linguamechanica.inference import parse_list_of_ints
-from linguamechanica.kinematics import UrdfRobotLibrary
+from linguamechanica.inference import (
+    initialize_inference_environment,
+    parse_list_of_ints,
+    setup_inference,
+)
 from linguamechanica.se3 import ImplicitDualQuaternion
 
 
@@ -49,7 +51,12 @@ class VisualTester:
 
     def test(self):
         self.robot_ids = self.setup_pybullet()
-        environment, agent, state, initial_reward = self.setup_inference()
+        environment, agent = setup_inference(
+            urdf=self.urdf, checkpoint=self.checkpoint, samples=self.samples
+        )
+        state, initial_reward = initialize_inference_environment(
+            environment, target_thetas=self.target_thetas, target_pose=self.target_pose
+        )
         self.solve_ik(state, agent, environment, initial_reward)
 
     def setup_pybullet(self):
@@ -77,37 +84,6 @@ class VisualTester:
             p.resetBasePositionAndOrientation(initial_robot_id, [0, 0, 0], [0, 0, 0, 1])
         p.setGravity(0, 0, 0)
         return PyBulletRobotIds(robot_id, target_robot_id, initial_robot_id)
-
-    def setup_inference(self):
-        urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=self.urdf)
-        # TODO: make this generic
-        open_chain = urdf_robot.extract_open_chains(self.se3, 0.3)[-1].cuda()
-        agent = IKAgent.from_checkpoint(
-            open_chain=open_chain, checkpoint_id=self.checkpoint
-        ).cuda()
-        agent.training_state.episode_batch_size = self.samples
-        agent.training_state.level = self.level
-        environment = Environment(
-            open_chain=open_chain, training_state=agent.training_state
-        ).cuda()
-        state, initial_reward = None, None
-        if self.target_thetas is not None:
-            state, initial_reward = environment.reset_to_target_thetas(self.target_thetas)
-            for i in range(p.getNumJoints(self.robot_ids.robot_id)):
-                p.resetJointState(
-                    self.robot_ids.target_robot_id,
-                    i,
-                    environment.target_thetas[0, i].item(),
-                )
-        elif self.target_pose is not None:
-            state, initial_reward = environment.reset_to_target_pose(self.target_pose)
-        thetas, target_pose = Environment.thetas_target_pose_from_state(state)
-        self.draw_pose_as_axis(target_pose[0, :], self.robot_ids.robot_id)
-        for i in range(p.getNumJoints(self.robot_ids.robot_id)):
-            p.resetJointState(self.robot_ids.robot_id, i, thetas[0, i].item())
-            # if robot_ids.initial_robot_id != -1:
-            #    p.resetJointState(robot_ids.initial_robot_id, i, thetas[0, i].item())
-        return environment, agent, state, initial_reward
 
     def draw_pose_as_axis(
         self, pose, parent_uid=0, life_time=0, len_damp=0.1, lineWidth=3.0, cd=1.0

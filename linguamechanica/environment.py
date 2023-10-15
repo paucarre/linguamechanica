@@ -61,7 +61,6 @@ class Environment:
     def thetas_target_pose_from_state(state):
         return state[:, 6:], state[:, :6]
 
-
     def current_pose(self):
         current_transformation = self.open_chain.forward_kinematics(self.current_thetas)
         return self.open_chain.se3.log(current_transformation)
@@ -85,10 +84,9 @@ class Environment:
         samples = self.training_state.episode_batch_size
         self.target_pose = target_pose.unsqueeze(0).repeat(samples, 1).to(self.device)
         self.current_thetas = (
-            ( 2.0 * (torch.rand(samples, self.open_chain.dof()).to(self.device) - 0.5) )
-            * torch.pi
-        )
-        #$self.uniformly_sample_parameters_within_constraints()
+            2.0 * (torch.rand(samples, self.open_chain.dof()).to(self.device) - 0.5)
+        ) * torch.pi
+        # $self.uniformly_sample_parameters_within_constraints()
         self.target_thetas = None
         return self._reset(summary)
 
@@ -97,9 +95,8 @@ class Environment:
         target_transformation = self.open_chain.forward_kinematics(self.target_thetas)
         self.target_pose = self.open_chain.se3.log(target_transformation)
         noise = (
-            ( 2.0 * (torch.rand_like(self.target_thetas) - 0.5) )
-            * self.training_state.initial_theta_std_dev()
-        )
+            2.0 * (torch.rand_like(self.target_thetas) - 0.5)
+        ) * self.training_state.initial_theta_std_dev()
         self.current_thetas = (self.target_thetas.detach().clone() + noise).to(
             self.device
         )
