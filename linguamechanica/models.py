@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -79,8 +81,35 @@ class InverseKinematicsActor(nn.Module):
             bias=False,
         )
         torch.nn.init.uniform_(self.fc_angle_mean.weight, a=-1e-5, b=1e-5)
-        # Standard deviation where the stdev are stored as learnable weights
-        self.fc_angle_log_std_dev = nn.Parameter(torch.zeros(1, thetas_count))
+
+        self.max_log_std_dev = math.log(self.max_std_dev)
+        # TODO: make initial std dev configurable, for mow it is set to 1e-8
+        initial_log_std = self.max_log_std_dev - math.log(1e-8)
+        """
+        NOTE:
+        We use a network for the log std dev instead of direct parameters
+        because the standard deviation should depend on the pose error
+        between the current pose and the target pose.
+        
+        An example of direct parameters is: 
+        https://github.com/vwxyzjn/ppo-implementation-details/blob/main/ppo_continuous_action.py#L124
+        """
+        self.fc_angle_log_std_dev_1 = fc_init(
+            nn.Linear(
+                in_features=weights + on_manifold_count,
+                out_features=weights,
+                bias=True,
+            )
+        )
+        self.fc_angle_log_std_dev_2 = fc_init(
+            nn.Linear(
+                in_features=weights,
+                out_features=thetas_count,
+                bias=True,
+            ),
+            weight=1e-8,
+            bias_const=initial_log_std,
+        )
 
     def device(self):
         return self.fc1.weight.device
@@ -93,20 +122,28 @@ class InverseKinematicsActor(nn.Module):
         x = torch.cat([F.tanh(self.fc4(x)), manifold_error], 1)
         x = torch.cat([F.tanh(self.fc5(x)), manifold_error], 1)
         x = torch.cat([F.tanh(self.fc6(x)), manifold_error], 1)
-        # Angle mean from -PI to PI
-        angle_delta_mean = self.fc_angle_mean(x)
-        # angle_delta_mean = self.fc_angle_mean(x)
-        action_log_std_dev = self.fc_angle_log_std_dev.expand_as(angle_delta_mean)
+        angle_delta_mean = F.tanh(self.fc_angle_mean(x)) * self.max_action
+        x = F.tanh(self.fc_angle_log_std_dev_1(x))
+        x = self.fc_angle_log_std_dev_2(x)
+        """
+        We want the std dev to be limited to `self.max_std_dev` radiants.
+        This means the log of the std dev can't be higher than `self.max_log_std_dev`
+        By using the negative softplus and adding `self.max_log_std_dev` we archive this.
+        """
+        action_log_std_dev = self.max_log_std_dev - F.softplus(x)
         action_std_dev = torch.exp(action_log_std_dev)
-        action_std_dev = torch.clip(action_std_dev, -self.max_std_dev, self.max_std_dev)
         angle_delta_probabilities = Normal(angle_delta_mean, action_std_dev)
         angle_delta_action = angle_delta_probabilities.sample()
+        # Here the clip is done on a sample which has no gradient, thus the clipping won't affect
+        # any gradient
         angle_delta_action = torch.clip(
             angle_delta_action, -self.max_action, self.max_action
         )
+        # See https://github.com/vwxyzjn/ppo-implementation-details/blob/main/ppo_continuous_action.py#L130
         return (
             angle_delta_mean,
             angle_delta_action,
+            # TODO: check if this makes any sense and use it in case it does
             angle_delta_probabilities.log_prob(angle_delta_action).sum(1),
             angle_delta_probabilities.entropy().sum(1),
         )

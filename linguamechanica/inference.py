@@ -1,27 +1,26 @@
-from linguamechanica.kinematics import UrdfRobotLibrary
-from linguamechanica.environment import Environment
-from linguamechanica.agent import IKAgent
-from linguamechanica.environment import Environment
-from linguamechanica.kinematics import UrdfRobotLibrary
 import click
 import torch
 
-
-def target_thetas_reset(environment, target_thetas):
-    target_thetas = [float(theta) for theta in target_thetas.split(",")]
-    target_thetas = torch.tensor(target_thetas)
-    return environment.reset_to_target_thetas(target_thetas)
-
-
-def target_pose_reset(environment, target_pose):
-    target_pose = [float(element) for element in target_pose.split(",")]
-    target_pose = torch.tensor(target_pose)
-    return environment.reset_to_target_pose(target_pose)
+from linguamechanica.agent import IKAgent
+from linguamechanica.environment import Environment
+from linguamechanica.kinematics import UrdfRobotLibrary
+from linguamechanica.se3 import ImplicitDualQuaternion
 
 
-def setup_inference(urdf, checkpoint, samples, target_thetas, target_pose):
+def parse_list_of_ints(list_of_ints):
+    if list_of_ints is not None:
+        list_of_ints = [float(element) for element in list_of_ints.split(",")]
+        list_of_ints = torch.tensor(list_of_ints)
+        return list_of_ints
+    else:
+        return None
+
+
+def setup_inference(urdf, checkpoint, samples):
     urdf_robot = UrdfRobotLibrary.from_urdf_path(urdf_path=urdf)
-    open_chain = urdf_robot.extract_open_chains(0.3)[-1].cuda()
+    # TODO: make this generic
+    se3 = ImplicitDualQuaternion()
+    open_chain = urdf_robot.extract_open_chains(se3, 0.3)[-1].cuda()
     agent = IKAgent.from_checkpoint(
         open_chain=open_chain, checkpoint_id=checkpoint
     ).cuda()
@@ -29,13 +28,17 @@ def setup_inference(urdf, checkpoint, samples, target_thetas, target_pose):
     environment = Environment(
         open_chain=open_chain, training_state=agent.training_state
     ).cuda()
+    return environment, agent
+
+
+def initialize_inference_environment(environment, target_thetas, target_pose):
     state, initial_reward = None, None
     if target_thetas is not None:
-        state, initial_reward = target_thetas_reset(environment, target_thetas)
+        state, initial_reward = environment.reset_to_target_thetas(target_thetas)
     elif target_pose is not None:
-        state, initial_reward = target_pose_reset(environment, target_pose)
+        state, initial_reward = environment.reset_to_target_pose(target_pose)
     thetas, target_pose = Environment.thetas_target_pose_from_state(state)
-    return environment, agent, state, initial_reward
+    return state, initial_reward
 
 
 def inference_results_to_csv(thetas_sorted, reward_sorted):
@@ -80,9 +83,13 @@ def inference_results_to_csv(thetas_sorted, reward_sorted):
 @click.option("--target_pose", type=str, required=False)
 @click.option("--top_n", type=int, default=10, required=True)
 def inference(checkpoint, urdf, samples, iterations, target_thetas, target_pose, top_n):
-    target_thetas is not None
-    environment, agent, state, initial_reward = setup_inference(
-        urdf, checkpoint, samples, target_thetas, target_pose
+    target_thetas = parse_list_of_ints(target_thetas)
+    target_pose = parse_list_of_ints(target_pose)
+    environment, agent = setup_inference(
+        urdf=urdf, checkpoint=checkpoint, samples=samples
+    )
+    state, initial_reward = initialize_inference_environment(
+        environment, target_thetas=target_thetas, target_pose=target_pose
     )
     thetas_sorted, reward_sorted = agent.inference(
         iterations, state, environment, top_n

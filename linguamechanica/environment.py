@@ -1,6 +1,8 @@
+import math
 import random
+
 import torch
-from pytorch3d import transforms
+
 from linguamechanica.kinematics import DifferentiableOpenChainMechanism
 
 
@@ -33,10 +35,15 @@ class Environment:
         for sample_idx in range(self.training_state.episode_batch_size):
             coordinates = []
             for i in range(len(self.open_chain.joint_limits)):
+                """
+                TODO: use constraints once they are properly tested...
+                self.open_chain.joint_limits[i][0],
+                self.open_chain.joint_limits[i][1])
+                """
                 coordinates.append(
                     random.uniform(
-                        self.open_chain.joint_limits[i][0],
-                        self.open_chain.joint_limits[i][1],
+                        -torch.pi,
+                        torch.pi,
                     )
                 )
             samples.append(torch.Tensor(coordinates).unsqueeze(0))
@@ -54,22 +61,14 @@ class Environment:
     def thetas_target_pose_from_state(state):
         return state[:, 6:], state[:, :6]
 
-    def reset_to_target_pose(self, target_pose, summary=None):
-        samples = self.training_state.episode_batch_size
-        self.target_pose = target_pose.unsqueeze(0).repeat(samples, 1).to(self.device)
-        self.current_thetas = self.uniformly_sample_parameters_within_constraints()
-        return self._reset(summary)
-
     def current_pose(self):
-        current_transformation = self.open_chain.forward_transformation(
-            self.current_thetas
-        )
-        return transforms.se3_log_map(current_transformation.get_matrix())
+        current_transformation = self.open_chain.forward_kinematics(self.current_thetas)
+        return self.open_chain.se3.log(current_transformation)
 
     def reset_to_random_targets(self, summary=None):
         target_thetas_batch = self.uniformly_sample_parameters_within_constraints()
         return self._reset_to_target_thetas_batch(
-            target_thetas_batch=target_thetas_batch
+            target_thetas_batch=target_thetas_batch, summary=summary
         )
 
     def reset_to_target_thetas(self, target_thetas, summary=None):
@@ -81,16 +80,23 @@ class Environment:
             target_thetas_batch=target_thetas_batch
         )
 
+    def reset_to_target_pose(self, target_pose, summary=None):
+        samples = self.training_state.episode_batch_size
+        self.target_pose = target_pose.unsqueeze(0).repeat(samples, 1).to(self.device)
+        self.current_thetas = (
+            2.0 * (torch.rand(samples, self.open_chain.dof()).to(self.device) - 0.5)
+        ) * torch.pi
+        # $self.uniformly_sample_parameters_within_constraints()
+        self.target_thetas = None
+        return self._reset(summary)
+
     def _reset_to_target_thetas_batch(self, target_thetas_batch, summary=None):
         self.target_thetas = target_thetas_batch
-        target_transformation = self.open_chain.forward_transformation(
-            self.target_thetas
-        )
-        self.target_pose = transforms.se3_log_map(target_transformation.get_matrix())
+        target_transformation = self.open_chain.forward_kinematics(self.target_thetas)
+        self.target_pose = self.open_chain.se3.log(target_transformation)
         noise = (
-            torch.randn_like(self.target_thetas)
-            * self.training_state.initial_theta_std_dev()
-        )
+            2.0 * (torch.rand_like(self.target_thetas) - 0.5)
+        ) * self.training_state.initial_theta_std_dev()
         self.current_thetas = (self.target_thetas.detach().clone() + noise).to(
             self.device
         )
@@ -126,10 +132,13 @@ class Environment:
         return observation, self.initial_reward
 
     @staticmethod
-    def compute_reward(open_chain, thetas, target_pose, weights):
-        error_pose = open_chain.compute_error_pose(thetas, target_pose)
+    def compute_reward(open_chain, thetas, target_pose, weights, summary=None, t=None):
+        error_pose = open_chain.compute_error_pose(
+            thetas, target_pose, summary=summary, t=t
+        )
         pose_error = DifferentiableOpenChainMechanism.compute_weighted_error(
-            error_pose, weights
+            error_pose,
+            weights,
         )
         reward = -pose_error.unsqueeze(1)
         return reward
@@ -143,6 +152,13 @@ class Environment:
         within_steps = self.current_step < self.training_state.max_steps_done
         self.current_step[within_steps] += 1
         self.current_thetas[:, :] += action[:, :]
+        self.current_thetas[self.current_thetas > math.pi] = self.current_thetas[
+            self.current_thetas > math.pi
+        ] - (2.0 * math.pi)
+        self.current_thetas[self.current_thetas < -math.pi] = self.current_thetas[
+            self.current_thetas < -math.pi
+        ] + (2.0 * math.pi)
+
         reward = Environment.compute_reward(
             self.open_chain,
             self.current_thetas,

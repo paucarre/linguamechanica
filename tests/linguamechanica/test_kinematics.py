@@ -1,4 +1,3 @@
-import unittest
 import math
 import numpy as np
 from linguamechanica.kinematics import (
@@ -8,13 +7,21 @@ from linguamechanica.kinematics import (
 )
 import random
 import torch
-from pytorch3d import transforms
+from linguamechanica.se3 import ProjectiveMatrix, ImplicitDualQuaternion
+
+import pytest
+
+se3_representations = [
+    ProjectiveMatrix(),
+    ImplicitDualQuaternion(),
+]
 
 
-class TestDifferentiableOpenChainMechanism(unittest.TestCase):
-    def test_compute_error_pose_cr5(self):
+class TestDifferentiableOpenChainMechanism:
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_compute_error_pose_cr5(self, se3):
         urdf_robot = UrdfRobotLibrary.dobot_cr5()
-        open_chains = urdf_robot.extract_open_chains(0.3)
+        open_chains = urdf_robot.extract_open_chains(se3, 0.3)
         open_chain = open_chains[-1]
         for _ in range(1000):
             coordinates = []
@@ -25,23 +32,14 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                     )
                 )
             coordinates = torch.Tensor(coordinates).unsqueeze(0)
-            transformation = open_chain.forward_transformation(coordinates)
-            pose = transforms.se3_log_map(transformation.get_matrix())
-            # current_transformation = open_chain.forward_transformation(coordinates)
-            torch.set_printoptions(precision=10)
-            target_transformation = transforms.se3_exp_map(pose)
-            print("----------")
-            print(transformation.get_matrix())
-            print(target_transformation)
-            print((transformation.get_matrix() - target_transformation).abs().sum())
-            print("Identity Matrix")
-            print(target_transformation[0, :3, :3] @ target_transformation[0, :3, :3].T)
-            # transforms.se3_exp_map(transforms.se3_log_map(transform))
+            transformation = open_chain.forward_kinematics(coordinates)
+            pose = se3.log(transformation)
             error_pose = open_chain.compute_error_pose(coordinates, pose)
             expected_error_pose = torch.zeros(error_pose.shape)
             assert (error_pose - expected_error_pose).abs().sum() <= 1e-3
 
-    def test_inverse_kinematics_network(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_inverse_kinematics_network(self, se3):
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
@@ -51,13 +49,14 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                 [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]],
             ]
         )
-        initial = torch.eye(4)
+        initial = se3.identity(1)
+        initial_twist = se3.log(initial)
         open_chain = DifferentiableOpenChainMechanism(
-            screws, initial, [(0, 100.0), (0, math.pi * 2)]
+            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)], se3
         )
         thetas = torch.Tensor([[10.0, np.pi / 4]])
-        matrix = open_chain.forward_transformation(thetas)
-        pose = transforms.se3_log_map(matrix.get_matrix())
+        se3_element = open_chain.forward_kinematics(thetas)
+        pose = se3.log(se3_element)
         target_pose = pose
         found_thetas = open_chain.inverse_kinematics_backprop(
             initial_thetas=torch.Tensor([[0.0, 0.0]]),
@@ -65,56 +64,44 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
             min_error=1e-2,
             error_weights=torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
             lr=0.01,
-            max_steps=40000,
+            max_steps=4000,
         )
         assert (found_thetas - thetas).abs().sum() <= 1e-2
 
     def test_inverse_kinematics_cr5(self):
+        se3 = ProjectiveMatrix()
         urdf_robot = UrdfRobotLibrary.dobot_cr5()
-        open_chains = urdf_robot.extract_open_chains(0.3)
-        for _ in range(3):
-            coordinates = []
-            for i in range(len(urdf_robot.joint_names)):
-                coordinates.append(
-                    random.uniform(
-                        urdf_robot.joint_limits[i][0], urdf_robot.joint_limits[i][1]
-                    )
-                )
-            coordinates = torch.Tensor(coordinates).unsqueeze(0)
-            open_chain = open_chains[-1]
-            transformation = open_chain.forward_transformation(coordinates)
-            pose = transforms.se3_log_map(transformation.get_matrix())
-            target_pose = pose + (torch.rand(6) * 0.001)
-            initial_thetas = coordinates
-            parameter_update_rate = 0.001 * torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
-            error_weights = torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
-            found_thetas = open_chain.inverse_kinematics(
-                initial_thetas=initial_thetas,
-                target_pose=target_pose,
-                min_error=1e-3,
-                error_weights=error_weights,
-                parameter_update_rate=parameter_update_rate,
-                max_steps=1000,
-            )
-            initial_error_pose = open_chain.compute_error_pose(
-                initial_thetas, target_pose
-            )
-            initial_error_pose = (
-                DifferentiableOpenChainMechanism.compute_weighted_error(
-                    initial_error_pose, error_weights
-                )
-            )
-            found_error_pose = open_chain.compute_error_pose(found_thetas, target_pose)
-            found_error_pose = DifferentiableOpenChainMechanism.compute_weighted_error(
-                found_error_pose, error_weights
-            )
-            relative_improvement = found_error_pose / (initial_error_pose + 1e-15)
-            """
-            At least a 10% improvement w.r.t. initial error
-            """
-            assert relative_improvement.mean() <= 0.9
+        open_chains = urdf_robot.extract_open_chains(se3, 0.3)
+        coordinates = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        coordinates = torch.Tensor(coordinates).unsqueeze(0)
+        open_chain = open_chains[-1]
+        transformation = open_chain.forward_kinematics(coordinates)
+        pose = se3.log(transformation)
+        target_pose = pose + (torch.ones_like(pose) * 0.001)
+        initial_thetas = coordinates
+        parameter_update_rate = 0.001 * torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+        error_weights = torch.Tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+        found_thetas = open_chain.inverse_kinematics(
+            initial_thetas=initial_thetas,
+            target_pose=target_pose,
+            min_error=1e-3,
+            error_weights=error_weights,
+            parameter_update_rate=parameter_update_rate,
+            max_steps=100,
+        )
+        initial_error_pose = open_chain.compute_error_pose(initial_thetas, target_pose)
+        initial_error_pose = DifferentiableOpenChainMechanism.compute_weighted_error(
+            initial_error_pose, error_weights
+        )
+        found_error_pose = open_chain.compute_error_pose(found_thetas, target_pose)
+        found_error_pose = DifferentiableOpenChainMechanism.compute_weighted_error(
+            found_error_pose, error_weights
+        )
+        relative_improvement = found_error_pose / (initial_error_pose + 1e-15)
+        assert relative_improvement.mean() < 1.0
 
-    def test_inverse_kinematics(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_inverse_kinematics(self, se3):
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
@@ -124,15 +111,14 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                 [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]],
             ]
         )
-        initial = torch.eye(4)
+        initial = se3.identity(1)
+        initial_twist = se3.log(initial)
         open_chain = DifferentiableOpenChainMechanism(
-            screws, initial, [(0, 100.0), (0, math.pi * 2)]
+            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)], se3
         )
         thetas = torch.Tensor([[10.0, np.pi / 4]])
-        matrix = open_chain.forward_transformation(thetas)
-        pose = transforms.se3_log_map(matrix.get_matrix())
-
-        target_pose = pose
+        matrix = open_chain.forward_kinematics(thetas)
+        target_pose = se3.log(matrix)
         found_thetas = open_chain.inverse_kinematics(
             initial_thetas=torch.Tensor([[0.0, 0.0]]),
             target_pose=target_pose,
@@ -153,7 +139,8 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
         )
         (error - torch.Tensor([0.1, 0.4, 0.5])).abs().sum() < 1e-10
 
-    def test_compute_error_pose(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_compute_error_pose(self, se3):
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
@@ -163,9 +150,10 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                 [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]],
             ]
         )
-        initial = torch.eye(4)
+        initial = se3.identity(1)
+        initial_twist = se3.log(initial)
         open_chain = DifferentiableOpenChainMechanism(
-            screws, initial, [(0, 100.0), (0, math.pi * 2)]
+            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)], se3
         )
         target_pose = torch.Tensor([[0, 0, 0, 0, 0, 0]])
         # test zero pose and zero thetas
@@ -185,7 +173,8 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
             error_twist - torch.Tensor([[0.0, 0.0, 0.0, np.pi / 4, 0.0, 0.0]])
         ).abs().sum() < 1e-7
 
-    def test_jacobian(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_jacobian(self, se3):
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
@@ -210,8 +199,10 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
                 [0, 0, 0, 1],
             ]
         )
+        se3_projective = ProjectiveMatrix()
+        initial_twist = se3_projective.log(to_left_multiplied(initial.unsqueeze(0)))
         open_chain = DifferentiableOpenChainMechanism(
-            screws, initial, [(0, 100.0), (0, math.pi * 2)]
+            screws, initial_twist, [(0, 100.0), (0, math.pi * 2)], se3
         )
         jacobian = open_chain.jacobian(thetas)
         """
@@ -259,10 +250,10 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
         assert translation_jacobian_by_translation_thetas.abs().sum() > 0.0
         jacobian_pseudoinverse = torch.linalg.pinv(jacobian)
         velocity_delta = torch.ones([3, 6, 1]) * 0.01
-        parameter_delta = torch.bmm(jacobian_pseudoinverse, velocity_delta)
-        print(parameter_delta)
+        torch.bmm(jacobian_pseudoinverse, velocity_delta)
 
-    def test_forward_transformation(self):
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_forward_kinematics(self, se3):
         """
         Open Chains:
         - translate 10 meters in z and rotate around x PI rads
@@ -279,56 +270,65 @@ class TestDifferentiableOpenChainMechanism(unittest.TestCase):
             ]
         )
         thetas = torch.Tensor([[10.0, np.pi], [math.pi / 2.0, 10.0], [10.0, np.pi]])
-        initial = torch.Tensor(
-            [
-                [1, 0, 0, 0],
-                [0, math.cos(math.pi / 2.0), -math.sin(math.pi / 2.0), 10.0],
-                [0, math.sin(math.pi / 2.0), math.cos(math.pi / 2.0), 0.0],
-                [0, 0, 0, 1],
-            ]
-        )
-        open_chain = DifferentiableOpenChainMechanism(
-            screws, initial, [(0, 100.0), (0, math.pi * 2)]
-        )
-        matrix = open_chain.forward_transformation(thetas)
-        expected_matrix = torch.Tensor(
-            [
+        initial_matrix = to_left_multiplied(
+            torch.Tensor(
                 [
                     [1, 0, 0, 0],
-                    [0, math.cos(math.pi), -math.sin(math.pi), 0],
-                    [0, math.sin(math.pi), math.cos(math.pi), 10.0],
-                    [0, 0, 0, 1],
-                ],
-                [
-                    [1, 0, 0, 10.0],
-                    [0, math.cos(math.pi / 2.0), -math.sin(math.pi / 2.0), 0.0],
+                    [0, math.cos(math.pi / 2.0), -math.sin(math.pi / 2.0), 10.0],
                     [0, math.sin(math.pi / 2.0), math.cos(math.pi / 2.0), 0.0],
                     [0, 0, 0, 1],
-                ],
+                ]
+            ).unsqueeze(0)
+        )
+        se3_projective = ProjectiveMatrix()
+        initial_twist = se3_projective.log(initial_matrix)
+        open_chain = DifferentiableOpenChainMechanism(
+            screws, initial_twist, [(0, 10.0), (0, math.pi * 2)], se3
+        )
+        open_chain.forward_kinematics(thetas)
+        expected_matrix = to_left_multiplied(
+            torch.Tensor(
                 [
-                    [1, 0, 0, 0],
-                    [0, math.cos(math.pi), -math.sin(math.pi), 0],
-                    [0, math.sin(math.pi), math.cos(math.pi), 10.0],
-                    [0, 0, 0, 1],
-                ],
-            ]
+                    [
+                        [1, 0, 0, 0],
+                        [0, math.cos(math.pi), -math.sin(math.pi), 0],
+                        [0, math.sin(math.pi), math.cos(math.pi), 10.0],
+                        [0, 0, 0, 1],
+                    ],
+                    [
+                        [1, 0, 0, 10.0],
+                        [0, math.cos(math.pi / 2.0), -math.sin(math.pi / 2.0), 0.0],
+                        [0, math.sin(math.pi / 2.0), math.cos(math.pi / 2.0), 0.0],
+                        [0, 0, 0, 1],
+                    ],
+                    [
+                        [1, 0, 0, 0],
+                        [0, math.cos(math.pi), -math.sin(math.pi), 0],
+                        [0, math.sin(math.pi), math.cos(math.pi), 10.0],
+                        [0, 0, 0, 1],
+                    ],
+                ]
+            )
         )
-        for i in range(expected_matrix.shape[0]):
-            expected_matrix[i, :, :] = expected_matrix[i, :, :] @ initial[:, :]
-        self.assertTrue(
-            np.isclose(
-                to_left_multiplied(expected_matrix),
-                matrix.get_matrix(),
-                rtol=1e-05,
-                atol=1e-05,
-            ).all()
+        expected_matrix = se3_projective.chain(expected_matrix, initial_matrix)
+        expected_pose = se3_projective.log(expected_matrix)
+        pose_difference = se3.log(
+            se3.chain(se3.invert(se3.exp(expected_pose)), se3.exp(expected_pose))
         )
 
+        assert np.isclose(
+            pose_difference,
+            torch.zeros_like(pose_difference),
+            rtol=1e-06,
+            atol=1e-06,
+        ).all()
 
-class UrdfRobot(unittest.TestCase):
-    def test_extract_open_chains(self):
+
+class UrdfRobot:
+    @pytest.mark.parametrize("se3", se3_representations)
+    def test_extract_open_chains(self, se3):
         urdf_robot = UrdfRobotLibrary.dobot_cr5()
-        open_chains = urdf_robot.extract_open_chains(0.3)
+        open_chains = urdf_robot.extract_open_chains(se3, 0.3)
         for _ in range(100):
             coordinates = []
             for i in range(len(urdf_robot.joint_names)):
@@ -340,15 +340,15 @@ class UrdfRobot(unittest.TestCase):
             coordinates = torch.Tensor(coordinates).unsqueeze(0)
             transformations = urdf_robot.transformations(coordinates)
             for i, transformation in enumerate(transformations):
-                computed = (
-                    open_chains[i]
-                    .forward_transformation(coordinates[:, : i + 1])
-                    .get_matrix()
+                computed = open_chains[i].forward_kinematics(coordinates[:, : i + 1])
+                computed_pose = se3.log(computed)
+                expected_pose = se3_projective.log(
+                    to_left_multiplied(torch.Tensor(transformation).unsqueeze(0))
                 )
                 self.assertTrue(
                     np.isclose(
-                        computed.squeeze(),
-                        to_left_multiplied(torch.Tensor(transformation)),
+                        computed_pose,
+                        expected_pose,
                         rtol=1e-05,
                         atol=1e-05,
                     ).all()

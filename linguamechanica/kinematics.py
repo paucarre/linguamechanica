@@ -1,18 +1,17 @@
+import matplotlib.pyplot as plt
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
 from pytransform3d.transformations import (
     exponential_coordinates_from_transform,
     invert_transform,
 )
 from pytransform3d.urdf import (
     UrdfTransformManager,
-    parse_urdf,
     initialize_urdf_transform_manager,
+    parse_urdf,
 )
-import matplotlib.pyplot as plt
-import torch
-import torch.nn as nn
-from pytorch3d import transforms
-import torch.optim as optim
 
 
 def to_left_multiplied(right_multiplied):
@@ -68,19 +67,20 @@ class KinematicsNetwork(nn.Module):
 
 
 class DifferentiableOpenChainMechanism:
-    def __init__(self, screws, initial_matrix, joint_limits):
+    def __init__(self, screws, initial_twist, joint_limits, se3):
         self.screws = screws
-        self.initial_matrix = to_left_multiplied(initial_matrix)
+        self.se3 = se3
+        self.initial_element = self.se3.exp(initial_twist)
         self.joint_limits = joint_limits
         self.device = "cpu"
         self.screws = self.screws.to(self.device)
-        self.initial_matrix = self.initial_matrix.to(self.screws.device)
+        self.initial_element = self.initial_element.to(self.screws.device)
 
     def to(self, device):
         # TODO: this is broken, fix it
         device = "cuda:0"
         self.screws = self.screws.to(device)
-        self.initial_matrix = self.initial_matrix.to(device)
+        self.initial_element = self.initial_element.to(device)
         self.device = device
         return self
 
@@ -92,29 +92,29 @@ class DifferentiableOpenChainMechanism:
         return self.to("cuda:0")
 
     def _jacobian_computation_forward(self, thetas):
-        transformation = self.forward_transformation(thetas)
-        twist = transforms.se3_log_map(transformation.get_matrix())
+        transformation = self.forward_kinematics(thetas)
+        twist = self.se3.log(transformation)
         return twist
 
     def compute_pose_and_error_pose(self, thetas, target_pose):
-        current_transformation = self.forward_transformation(thetas)
-        target_transformation = transforms.se3_exp_map(target_pose)
-        current_trans_to_target = current_transformation.compose(
-            transforms.Transform3d(matrix=target_transformation).inverse()
+        current_transformation = self.forward_kinematics(thetas)
+        target_transformation = self.se3.exp(target_pose)
+        current_trans_to_target = self.se3.chain(
+            self.se3.invert(target_transformation), current_transformation
         )
-        current_trans_to_target = current_trans_to_target.to(thetas.device).get_matrix()
-        error_pose = transforms.se3_log_map(current_trans_to_target)
-        pose = transforms.se3_log_map(current_transformation.get_matrix())
+        current_trans_to_target = current_trans_to_target.to(thetas.device)
+        error_pose = self.se3.log(current_trans_to_target)
+        pose = self.se3.log(current_transformation)
         return pose, error_pose
 
-    def compute_error_pose(self, thetas, target_pose):
-        current_transformation = self.forward_transformation(thetas)
-        target_transformation = transforms.se3_exp_map(target_pose)
-        current_trans_to_target = current_transformation.compose(
-            transforms.Transform3d(matrix=target_transformation).inverse()
+    def compute_error_pose(self, thetas, target_pose, summary=None, t=None):
+        current_transformation = self.forward_kinematics(thetas)
+        target_transformation = self.se3.exp(target_pose)
+        current_trans_to_target = self.se3.chain(
+            self.se3.invert(target_transformation), current_transformation
         )
-        current_trans_to_target = current_trans_to_target.to(thetas.device).get_matrix()
-        error_pose = transforms.se3_log_map(current_trans_to_target)
+        current_trans_to_target = current_trans_to_target.to(thetas.device)
+        error_pose = self.se3.log(current_trans_to_target)
         return error_pose
 
     def compute_weighted_error(error_pose, weights):
@@ -206,13 +206,12 @@ class DifferentiableOpenChainMechanism:
         jacobian = torch.take_along_dim(jacobian, selector, dim=2).squeeze(2)
         return jacobian
 
-    def forward_transformation(self, coordinates):
+    def forward_kinematics(self, coordinates):
         self.screws = self.screws.to(coordinates.device)
-        # print("forward_transformation", self.screws.shape, coordinates.unsqueeze(2).shape)
         twist = self.screws * coordinates.unsqueeze(2)
         original_shape = twist.shape
         twist = twist.view(-1, original_shape[2])
-        transformations = transforms.se3_exp_map(twist)
+        transformations = self.se3.exp(twist)
         """
         Transformations will have indices of this type:
         [
@@ -225,28 +224,19 @@ class DifferentiableOpenChainMechanism:
         ]
         """
         transformations = transformations.view(
-            original_shape[0],
-            original_shape[1],
-            transformations.shape[1],
-            transformations.shape[2],
+            original_shape[0], original_shape[1], *self.se3.element_shape()
         )
         chains_length = transformations.shape[1]
         num_chains = transformations.shape[0]
-        computed_transforms = transforms.Transform3d(
-            matrix=torch.eye(4)
-            .unsqueeze(0)
-            .repeat(num_chains, 1, 1)
-            .to(coordinates.device)
-        )
+        computed_transforms = self.se3.identity(num_chains).to(coordinates.device)
         for chain_idx in range(chains_length):
-            current_transformations = transforms.Transform3d(
-                matrix=transformations[:, chain_idx, :, :]
+            current_transformations = transformations[:, chain_idx, :]
+            computed_transforms = self.se3.chain(
+                computed_transforms, current_transformations
             )
-            computed_transforms = current_transformations.compose(computed_transforms)
-        initial_matrix = transforms.Transform3d(
-            matrix=self.initial_matrix.unsqueeze(0).repeat(num_chains, 1, 1)
-        )
-        return initial_matrix.compose(computed_transforms)
+        initial_element = self.se3.repeat(self.initial_element, num_chains)
+        forward_matrix = self.se3.chain(computed_transforms, initial_element)
+        return forward_matrix
 
     def __len__(self):
         return len(self.screws)
@@ -284,7 +274,7 @@ class UrdfRobot:
         )
         return transform
 
-    def extract_open_chains(self, epsillon):
+    def extract_open_chains(self, se3, epsillon):
         open_chains = []
         screws = []
         transform_zero = np.eye(4)
@@ -312,9 +302,15 @@ class UrdfRobot:
                 np.expand_dims(np.concatenate([screw[3:], screw[:3]]), axis=0)
             )
             screw_torch = torch.Tensor(np.concatenate(screws.copy()))
-            initial_torch = torch.Tensor(transform_zero)
+            initial_twist = exponential_coordinates_from_transform(
+                transform_zero.copy()
+            )
+            initial_twist = np.expand_dims(
+                np.concatenate([initial_twist[3:], initial_twist[:3]]), axis=0
+            )
+            initial_twist = torch.from_numpy(initial_twist).float()
             open_chain = DifferentiableOpenChainMechanism(
-                screw_torch, initial_torch, self.joint_limits[: i + 1]
+                screw_torch, initial_twist, self.joint_limits[: i + 1], se3
             )
             open_chains.append(open_chain)
         return open_chains
@@ -365,8 +361,3 @@ class UrdfRobotLibrary:
             urdf_data, mesh_path="./urdf/", package_dir="./urdf/", strict_check=True
         )
         return UrdfRobot(name, links, joints)
-
-
-if __name__ == "__main__":
-    urdf_robot = UrdfRobotLibrary.dobot_cr5()
-    open_chains = urdf_robot.extract_open_chains(0.1)
