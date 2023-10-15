@@ -61,7 +61,7 @@ python -m linguamechanica.train --urdf URDF_PATH --checkpoint CHECKPOINT_ID
 
 To run inference use:
 ```bash
-python -m linguamechanica.inference --checkpoint 256000 --target_thetas 0.4,-0.6,0.3,-0.5,0.5,0.2 --iterations 100 --samples 10000
+python -m linguamechanica.inference --checkpoint 927000 --target_thetas 0.4,-0.6,0.3,-0.5,0.5,0.2 --iterations 100 --samples 10000
 ```
 
 To visually test inverse kinematics from checkpoint use:
@@ -71,12 +71,12 @@ python -m linguamechanica.test --urdf URDF_PATH --checkpoint CHECKPOINT_ID
 
 Example to visually  test inverse kinematics using `target pose`:
 ```bash
-python -m linguamechanica.test --checkpoint 256000 --target_pose 1.13,-0.935,-0.0869,0.466,-2.67,2.2
+python -m linguamechanica.test --checkpoint 927000 --target_pose 1.13,-0.935,-0.0869,0.466,-2.67,2.2
 ```
 
 Example to visually  test inverse kinematics using `target thetas`:
 ```bash
-python -m linguamechanica.test --checkpoint 256000 --target_thetas 0.5,-0.8,0.3,-0.5,0.5,0.6 
+python -m linguamechanica.test --checkpoint 927000 --target_thetas 0.5,-0.8,0.3,-0.5,0.5,0.6 
 ```
 
 # Checkpoints
@@ -85,7 +85,7 @@ You can find checkpoints in [Google Drive](https://drive.google.com/drive/folder
 You need to download the checkpoints and leave them into the `checkpoints` folder.
 Then launch any of the command line programs such as:
 ```bash
-python -m linguamechanica.test --checkpoint 256000 --target_thetas 0.4,-0.6,0.3,-0.5,0.5,0.2 --iterations 100 --samples 10000
+python -m linguamechanica.test --checkpoint 927000 --target_thetas 0.4,-0.6,0.3,-0.5,0.5,0.2 --iterations 100 --samples 10000
 ```
 
 # Docker
@@ -93,6 +93,7 @@ python -m linguamechanica.test --checkpoint 256000 --target_thetas 0.4,-0.6,0.3,
 See the [docker documentation](docker/README.md) to setup a docker.
 Note that the way Docker is approached for `Linugua Mechanica` is to 
 set up a docker image with a mapped local home folder.
+Dockerization of the project is Work In Progress.
 
 
 # References
