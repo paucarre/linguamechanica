@@ -27,7 +27,7 @@ class TrainingState:
     tau: float = 0.05
     qlearning_batch_size: int = 32
     max_action_clip: float = torch.pi
-    max_time_steps: float = 1e6
+    max_time_steps: float = 1e8
     max_episodes_in_buffer: int = 10
     data_generation_without_actor_iterations: int = 20
     t: int = 0

@@ -54,8 +54,14 @@ class VisualTester:
         environment, agent = setup_inference(
             urdf=self.urdf, checkpoint=self.checkpoint, samples=self.samples
         )
+        initial_thetas = torch.zeros(environment.open_chain.dof())
+        std_dev = torch.pi
         state, initial_reward = initialize_inference_environment(
-            environment, target_thetas=self.target_thetas, target_pose=self.target_pose
+            environment,
+            target_thetas=self.target_thetas,
+            target_pose=self.target_pose,
+            initial_thetas=initial_thetas,
+            std_dev=std_dev,
         )
         self.solve_ik(state, agent, environment, initial_reward)
 

@@ -31,12 +31,29 @@ def setup_inference(urdf, checkpoint, samples):
     return environment, agent
 
 
-def initialize_inference_environment(environment, target_thetas, target_pose):
+def initialize_inference_environment(
+    environment, target_thetas, target_pose, initial_thetas, std_dev
+):
     state, initial_reward = None, None
     if target_thetas is not None:
         state, initial_reward = environment.reset_to_target_thetas(target_thetas)
     elif target_pose is not None:
-        state, initial_reward = environment.reset_to_target_pose(target_pose)
+        # state, initial_reward = environment.reset_to_target_pose(
+        #    target_pose, torch.zeros(environment.open_chain.dof()), torch.pi
+        # )
+        state, initial_reward = environment.reset_to_target_pose(
+            target_pose, initial_thetas, std_dev
+        )
+    thetas, target_pose = Environment.thetas_target_pose_from_state(state)
+    return state, initial_reward
+
+
+def initialize_target_pose_inference_environment(
+    environment, target_pose, initial_thetas, std_dev_initial_thetas
+):
+    state, initial_reward = environment.reset_to_target_pose(
+        target_pose, initial_thetas, std_dev_initial_thetas
+    )
     thetas, target_pose = Environment.thetas_target_pose_from_state(state)
     return state, initial_reward
 
@@ -88,8 +105,10 @@ def inference(checkpoint, urdf, samples, iterations, target_thetas, target_pose,
     environment, agent = setup_inference(
         urdf=urdf, checkpoint=checkpoint, samples=samples
     )
+    initial_thetas = torch.zeros(environment.open_chain.dof())
+    std_dev = torch.pi
     state, initial_reward = initialize_inference_environment(
-        environment, target_thetas=target_thetas, target_pose=target_pose
+        environment, target_thetas, target_pose, initial_thetas, std_dev
     )
     thetas_sorted, reward_sorted = agent.inference(
         iterations, state, environment, top_n

@@ -80,12 +80,19 @@ class Environment:
             target_thetas_batch=target_thetas_batch
         )
 
-    def reset_to_target_pose(self, target_pose, summary=None):
+    def reset_to_target_pose(
+        self,
+        target_pose,
+        initial_thetas,
+        std_dev_initial_thetas,
+        summary=None,
+    ):
         samples = self.training_state.episode_batch_size
         self.target_pose = target_pose.unsqueeze(0).repeat(samples, 1).to(self.device)
         self.current_thetas = (
-            2.0 * (torch.rand(samples, self.open_chain.dof()).to(self.device) - 0.5)
-        ) * torch.pi
+            (2.0 * (torch.rand(samples, self.open_chain.dof()).to(self.device) - 0.5))
+            * std_dev_initial_thetas
+        ) * (initial_thetas.to(self.device).unsqueeze(0).repeat(samples, 1))
         # $self.uniformly_sample_parameters_within_constraints()
         self.target_thetas = None
         return self._reset(summary)
