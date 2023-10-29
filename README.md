@@ -96,12 +96,24 @@ set up a docker image with a mapped local home folder.
 Dockerization of the project is Work In Progress.
 
 # ROS
-
-Use the following projects in your workspace while adding `linguamechanica` root folder in `PYTHONPATH` :
+First step is installing dependencies using the ROS `Python` by running:
+```
+source ros/bin/install-python-deps.sh
+```
+Then add the following projects in your ROS workspace while adding `linguamechanica` root folder in `PYTHONPATH` :
 ```
 https://github.com/paucarre/lingua_mechanica_kinematics_server
 https://github.com/paucarre/lingua_mechanica_kinematics_msgs
 https://github.com/paucarre/lingua_mechanica_kinematics_plugin
+```
+The next step is to launch the IK server by launching:
+```
+rosrun lingua_mechanica_kinematics_server lingua_mechanica_kinematics_server.py
+```
+Finally, add `lingua mechanica` as kinematics solver by updating your IK node configuration:
+```
+YOUR_ROBOT_ARM:
+  kinematics_solver: lingua_mechanica_kinematics_plugin/LinguaMechanicaKinematicsPlugin
 ```
 
 # References
