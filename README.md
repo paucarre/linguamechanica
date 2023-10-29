@@ -95,6 +95,14 @@ Note that the way Docker is approached for `Linugua Mechanica` is to
 set up a docker image with a mapped local home folder.
 Dockerization of the project is Work In Progress.
 
+# ROS
+
+Use the following projects in your workspace while adding `linguamechanica` root folder in `PYTHONPATH` :
+```
+https://github.com/paucarre/lingua_mechanica_kinematics_server
+https://github.com/paucarre/lingua_mechanica_kinematics_msgs
+https://github.com/paucarre/lingua_mechanica_kinematics_plugin
+```
 
 # References
  - [Robust and efficient forward, differential, and inverse kinematics using dual quaternions](http://www.neil.dantam.name/papers/dantam2020robust.pdf). [Neil T. Dantam](http://www.neil.dantam.name/)
